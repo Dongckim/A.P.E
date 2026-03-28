@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.gitignore
+.goreleaser.yml
+*.md
+!README.md
+bin/
+frontend/node_modules
+frontend/dist.bak
+.DS_Store
+.env
+*.pem
+*.key

@@ -1,5 +1,11 @@
 # A.P.E
 
+[![CI](https://github.com/Dongckim/A.P.E/actions/workflows/ci.yml/badge.svg)](https://github.com/Dongckim/A.P.E/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Dongckim/A.P.E)](https://github.com/Dongckim/A.P.E/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
+
 **AWS Platform Explorer** — browse EC2 files and S3 buckets from your browser.
 
 ```
