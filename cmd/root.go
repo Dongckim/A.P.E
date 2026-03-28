@@ -1,0 +1,272 @@
+package cmd
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+
+	"github.com/dongchankim/ape/internal/api"
+	"github.com/dongchankim/ape/internal/s3"
+	"github.com/dongchankim/ape/internal/server"
+	"github.com/dongchankim/ape/internal/sftp"
+)
+
+const banner = `
+          ▄▄██████████▄▄
+        ▄████████████████▄
+       ████████████████████
+       ███  (◕)    (◕)  ███
+       ████     ▄▄     ████
+        ████ ┌──────┐ ████
+         ████│ ━━━━ │████
+          ▀██└──────┘██▀
+            ▀████████▀
+
+       ██████  ██████  ██████
+       ██  ██  ██  ██  ██
+       ██████  ██████  ████
+       ██  ██  ██      ██
+       ██  ██  ██      ██████
+
+         AWS Platform Explorer
+               v0.1.0
+`
+
+const helpText = `
+──────────────────────────────────────────
+A.P.E is running. Commands:
+  /add     — connect additional EC2
+  /list    — list active connections
+  /status  — show connection info
+  /h       — show this help
+  /q       — quit A.P.E
+──────────────────────────────────────────
+`
+
+var reader *bufio.Reader
+
+func Execute() {
+	reader = bufio.NewReader(os.Stdin)
+
+	fmt.Print(banner)
+
+	connMgr := api.NewConnectionManager()
+
+	// Initialize S3 client (non-fatal if AWS credentials are missing)
+	var s3Client s3.S3Client
+	s3c, err := s3.New(context.Background(), "")
+	if err != nil {
+		fmt.Println("  ⚠ S3 not available: " + err.Error())
+	} else {
+		s3Client = s3c
+		fmt.Println("✓ S3 client initialized")
+	}
+
+	srv := server.New("127.0.0.1:9000", connMgr, s3Client)
+
+	cfg := promptConnection()
+	connectAndRegister(cfg, connMgr)
+
+	go func() {
+		if err := srv.Start(); err != nil && err.Error() != "http: Server closed" {
+			slog.Error("server error", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	fmt.Println("✓ Web UI ready at http://localhost:9000")
+	openBrowser("http://localhost:9000")
+
+	fmt.Print(helpText)
+	repl(srv, connMgr)
+}
+
+func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) {
+	fmt.Printf("\nConnecting to %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
+
+	client, err := sftp.Connect(cfg)
+	if err != nil {
+		fmt.Printf("  ✗ Connection failed: %s\n", err)
+		fmt.Println("  Retrying — fix the failing field:")
+
+		errMsg := err.Error()
+		for {
+			if strings.Contains(errMsg, "failed to load SSH key") || strings.Contains(errMsg, "passphrase") {
+				cfg.KeyPath = promptWithDefault("SSH key path", cfg.KeyPath)
+				if strings.Contains(errMsg, "passphrase") {
+					cfg.Passphrase = promptRequired("Key passphrase")
+				}
+			} else if strings.Contains(errMsg, "failed to connect") {
+				cfg.Host = promptRequired("EC2 host")
+				cfg.Port = promptWithDefault("SSH port", cfg.Port)
+				cfg.Username = promptWithDefault("Username", cfg.Username)
+			} else {
+				cfg = promptConnectionFull()
+			}
+
+			fmt.Printf("\nRetrying %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
+			client, err = sftp.Connect(cfg)
+			if err == nil {
+				break
+			}
+			fmt.Printf("  ✗ Connection failed: %s\n", err)
+			errMsg = err.Error()
+		}
+	}
+
+	id := connMgr.Add(client)
+	fmt.Println("✓ Connected!")
+	slog.Debug("connection registered", "id", id)
+}
+
+func promptConnection() sftp.ConnectConfig {
+	keyPath := promptWithDefault("SSH key path", "~/.ssh/id_rsa")
+	expanded := expandHome(keyPath)
+	if _, err := os.Stat(expanded); err != nil {
+		fmt.Printf("  ⚠ Key file not found: %s (will verify on connect)\n", keyPath)
+	} else {
+		keyPath = expanded
+	}
+
+	var host string
+	for attempts := 0; attempts < 3; attempts++ {
+		host = promptRequired("EC2 host")
+		if host != "" {
+			break
+		}
+		fmt.Println("  ✗ Host cannot be empty")
+	}
+	if host == "" {
+		fmt.Println("  ✗ No host provided, exiting.")
+		os.Exit(1)
+	}
+
+	username := promptWithDefault("Username", "ubuntu")
+
+	port := promptWithDefault("SSH port", "22")
+	if !isValidPort(port) {
+		fmt.Printf("  ⚠ Invalid port '%s', using default 22\n", port)
+		port = "22"
+	}
+
+	return sftp.ConnectConfig{
+		Host:     host,
+		Port:     port,
+		Username: username,
+		KeyPath:  keyPath,
+	}
+}
+
+func promptConnectionFull() sftp.ConnectConfig {
+	return promptConnection()
+}
+
+func repl(srv *server.Server, connMgr *api.ConnectionManager) {
+	for {
+		fmt.Print("\nape ▸ ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		input = strings.TrimSpace(input)
+
+		switch input {
+		case "/add":
+			fmt.Println("\n— Add new EC2 connection —")
+			cfg := promptConnection()
+			connectAndRegister(cfg, connMgr)
+
+		case "/list":
+			conns := connMgr.List()
+			if len(conns) == 0 {
+				fmt.Println("No active connections.")
+				continue
+			}
+			fmt.Println("\nActive connections:")
+			for i, c := range conns {
+				fmt.Printf("  [%d] %s (%s)\n", i+1, c.ID, c.Host)
+			}
+
+		case "/status":
+			conns := connMgr.List()
+			if len(conns) == 0 {
+				fmt.Println("No active connections.")
+				continue
+			}
+			c := conns[0]
+			fmt.Printf("\nCurrent connection:\n")
+			fmt.Printf("  Host:     %s\n", c.Host)
+			fmt.Printf("  Username: %s\n", c.Username)
+			fmt.Printf("  Port:     %s\n", c.Port)
+			fmt.Printf("  Web UI:   http://localhost:9000\n")
+
+		case "/h":
+			fmt.Print(helpText)
+
+		case "/q":
+			fmt.Println("Shutting down...")
+			if err := srv.Shutdown(); err != nil {
+				slog.Error("shutdown error", "err", err)
+			}
+			fmt.Println("Goodbye! 🦍")
+			os.Exit(0)
+
+		case "":
+			continue
+
+		default:
+			fmt.Printf("Unknown command: %s (type /h for help)\n", input)
+		}
+	}
+}
+
+func promptWithDefault(label, defaultVal string) string {
+	fmt.Printf("? %s (%s): ", label, defaultVal)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultVal
+	}
+	return input
+}
+
+func promptRequired(label string) string {
+	fmt.Printf("? %s: ", label)
+	input, _ := reader.ReadString('\n')
+	return strings.TrimSpace(input)
+}
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return home + path[1:]
+	}
+	return path
+}
+
+func isValidPort(port string) bool {
+	_, err := net.LookupPort("tcp", port)
+	return err == nil
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return
+	}
+	_ = cmd.Start()
+}
