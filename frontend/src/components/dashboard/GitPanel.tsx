@@ -57,7 +57,7 @@ export function GitPanel({ data, gitPath, onPathChange }: Props) {
 
           {/* Commit log */}
           <div className="space-y-0.5 max-h-52 overflow-y-auto">
-            {data.commits.map((c, i) => (
+            {(data.commits || []).map((c, i) => (
               <div key={c.hash + i} className="flex items-start gap-2 px-1 py-1 text-xs group">
                 <GitCommitIcon size={12} className={`shrink-0 mt-0.5 ${i === 0 ? "text-cyan-400" : "text-slate-600"}`} />
                 <div className="flex-1 min-w-0">

@@ -6,6 +6,7 @@ interface Props {
 }
 
 function formatBytes(bytes: number): string {
+  if (!bytes) return "0";
   if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(0) + " MB";
   return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
 }
@@ -13,6 +14,7 @@ function formatBytes(bytes: number): string {
 function formatUptime(since: string): string {
   if (!since) return "--";
   const start = new Date(since.replace(" ", "T"));
+  if (isNaN(start.getTime())) return "--";
   const diff = Date.now() - start.getTime();
   const days = Math.floor(diff / 86400000);
   const hours = Math.floor((diff % 86400000) / 3600000);
@@ -22,15 +24,25 @@ function formatUptime(since: string): string {
 }
 
 function Bar({ percent, color }: { percent: number; color: string }) {
+  const p = isNaN(percent) ? 0 : Math.min(percent, 100);
   return (
     <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-      <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+      <div className={`h-full rounded-full ${color}`} style={{ width: `${p}%` }} />
     </div>
   );
 }
 
+function barColor(pct: number, high: number, mid: number): string {
+  if (pct > high) return "bg-red-500";
+  if (pct > mid) return "bg-yellow-500";
+  return "bg-cyan-500";
+}
+
 export function SystemOverview({ data }: Props) {
-  const memPercent = data.memory.total > 0 ? (data.memory.used / data.memory.total) * 100 : 0;
+  const cpu = data.cpu || { usage_percent: 0, cores: 0 };
+  const mem = data.memory || { total: 0, used: 0, available: 0 };
+  const memPercent = mem.total > 0 ? (mem.used / mem.total) * 100 : 0;
+  const disks = data.disks || [];
 
   return (
     <div className="bg-slate-800/50 rounded-lg border border-slate-700 p-4">
@@ -43,42 +55,39 @@ export function SystemOverview({ data }: Props) {
       </div>
 
       <div className="text-xs text-slate-500 mb-4">
-        {data.hostname} — {data.os} ({data.arch})
+        {data.hostname || "unknown"} — {data.os || "unknown"} ({data.arch || "unknown"})
       </div>
 
       <div className="space-y-4">
-        {/* CPU */}
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Cpu size={12} /> CPU ({data.cpu.cores} cores)
+              <Cpu size={12} /> CPU ({cpu.cores} cores)
             </span>
-            <span className="text-xs text-white">{data.cpu.usage_percent.toFixed(1)}%</span>
+            <span className="text-xs text-white">{(cpu.usage_percent || 0).toFixed(1)}%</span>
           </div>
-          <Bar percent={data.cpu.usage_percent} color={data.cpu.usage_percent > 80 ? "bg-red-500" : data.cpu.usage_percent > 50 ? "bg-yellow-500" : "bg-cyan-500"} />
+          <Bar percent={cpu.usage_percent || 0} color={barColor(cpu.usage_percent || 0, 80, 50)} />
         </div>
 
-        {/* Memory */}
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="flex items-center gap-1.5 text-xs text-slate-400">
               <MemoryStick size={12} /> Memory
             </span>
-            <span className="text-xs text-white">{formatBytes(data.memory.used)} / {formatBytes(data.memory.total)}</span>
+            <span className="text-xs text-white">{formatBytes(mem.used)} / {formatBytes(mem.total)}</span>
           </div>
-          <Bar percent={memPercent} color={memPercent > 80 ? "bg-red-500" : memPercent > 50 ? "bg-yellow-500" : "bg-cyan-500"} />
+          <Bar percent={memPercent} color={barColor(memPercent, 80, 50)} />
         </div>
 
-        {/* Disks */}
-        {data.disks?.map((disk) => (
+        {disks.map((disk) => (
           <div key={disk.mount}>
             <div className="flex items-center justify-between mb-1">
               <span className="flex items-center gap-1.5 text-xs text-slate-400">
                 <HardDrive size={12} /> {disk.mount}
               </span>
-              <span className="text-xs text-white">{disk.percent}%</span>
+              <span className="text-xs text-white">{disk.percent || 0}%</span>
             </div>
-            <Bar percent={disk.percent} color={disk.percent > 90 ? "bg-red-500" : disk.percent > 70 ? "bg-yellow-500" : "bg-cyan-500"} />
+            <Bar percent={disk.percent || 0} color={barColor(disk.percent || 0, 90, 70)} />
           </div>
         ))}
       </div>

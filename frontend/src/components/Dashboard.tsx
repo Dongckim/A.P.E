@@ -65,9 +65,9 @@ export function Dashboard() {
         {overview && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <SystemOverview data={overview} />
-            {services && <ServicesList data={services} />}
+            <ServicesList data={services || { available_runtimes: [], docker: null, pm2: null, systemd: null }} />
             <GitPanel data={gitInfo} gitPath={gitPath} onPathChange={updateGitPath} />
-            <ProcessTable data={processes} />
+            <ProcessTable data={processes || []} />
           </div>
         )}
       </div>
