@@ -41,7 +41,7 @@ export function FileExplorer() {
     setSelected((prev) => {
       const next = new Set(prev);
       if (e.metaKey || e.ctrlKey) {
-        next.has(file.path) ? next.delete(file.path) : next.add(file.path);
+        if (next.has(file.path)) { next.delete(file.path); } else { next.add(file.path); }
       } else if (e.shiftKey && prev.size > 0) {
         const last = Array.from(prev).pop()!;
         const a = files.findIndex((f) => f.path === last);
