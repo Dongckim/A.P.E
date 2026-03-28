@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/dongchankim/ape/internal/api"
+	"github.com/dongchankim/ape/internal/config"
 	"github.com/dongchankim/ape/internal/s3"
 	"github.com/dongchankim/ape/internal/server"
 	"github.com/dongchankim/ape/internal/sftp"
@@ -87,7 +88,7 @@ func Execute() {
 
 	srv := server.New("127.0.0.1:9000", connMgr, s3Client)
 
-	cfg := promptConnection()
+	cfg := promptOrSelectConnection()
 	connectAndRegister(cfg, connMgr)
 
 	go func() {
@@ -140,6 +141,85 @@ func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) 
 	id := connMgr.Add(client)
 	fmt.Printf("  %s Connected!\n\n", dotOK)
 	slog.Debug("connection registered", "id", id)
+
+	promptSaveConnection(cfg)
+}
+
+func promptSaveConnection(cfg sftp.ConnectConfig) {
+	savedCfg, err := config.Load()
+	if err != nil {
+		return
+	}
+
+	// Skip if already saved with same host/port/username
+	for _, c := range savedCfg.Connections {
+		if c.Host == cfg.Host && c.Port == cfg.Port && c.Username == cfg.Username {
+			return
+		}
+	}
+
+	save := promptWithDefault("Save this connection? (y/n)", "y")
+	if !strings.EqualFold(save, "y") {
+		return
+	}
+
+	name := promptRequired("Connection name")
+	if name == "" {
+		name = fmt.Sprintf("%s@%s", cfg.Username, cfg.Host)
+	}
+
+	savedCfg.AddConnection(config.SavedConnection{
+		Name:     name,
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		Username: cfg.Username,
+		KeyPath:  cfg.KeyPath,
+	})
+
+	if err := config.Save(savedCfg); err != nil {
+		fmt.Printf("  %s Failed to save connection: %s\n", dotWarn, err)
+		return
+	}
+	fmt.Printf("  %s Connection saved as \"%s\"\n", dotOK, name)
+}
+
+func promptOrSelectConnection() sftp.ConnectConfig {
+	savedCfg, err := config.Load()
+	if err != nil {
+		slog.Debug("failed to load config", "err", err)
+		return promptConnection()
+	}
+
+	if len(savedCfg.Connections) == 0 {
+		return promptConnection()
+	}
+
+	fmt.Println("  Saved connections:")
+	for i, c := range savedCfg.Connections {
+		fmt.Printf("    [%d] %s — %s@%s:%s\n", i+1, c.Name, c.Username, c.Host, c.Port)
+	}
+	fmt.Printf("    [N] New connection\n\n")
+
+	choice := promptWithDefault("Select connection", "N")
+
+	if strings.EqualFold(choice, "n") || choice == "" {
+		return promptConnection()
+	}
+
+	idx := 0
+	if _, err := fmt.Sscanf(choice, "%d", &idx); err != nil || idx < 1 || idx > len(savedCfg.Connections) {
+		fmt.Printf("  %s Invalid choice, starting new connection\n\n", dotWarn)
+		return promptConnection()
+	}
+
+	sc := savedCfg.Connections[idx-1]
+	fmt.Printf("  Using saved connection: %s\n\n", sc.Name)
+	return sftp.ConnectConfig{
+		Host:     sc.Host,
+		Port:     sc.Port,
+		Username: sc.Username,
+		KeyPath:  expandHome(sc.KeyPath),
+	}
 }
 
 func promptConnection() sftp.ConnectConfig {
