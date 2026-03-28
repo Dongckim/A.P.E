@@ -4,7 +4,13 @@ const BASE = "/api";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, init);
-  const json: ApiResponse<T> = await res.json();
+  const text = await res.text();
+  let json: ApiResponse<T>;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid response from ${url}: ${text.slice(0, 100)}`);
+  }
   if (json.error) throw new Error(json.error);
   return json.data;
 }

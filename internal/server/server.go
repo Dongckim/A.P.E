@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dongchankim/ape/frontend"
@@ -20,41 +21,44 @@ type Server struct {
 func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client) *Server {
 	apiMux := api.NewRouter(connMgr, s3Client)
 
-	mux := http.NewServeMux()
-
-	// API routes
-	mux.Handle("/api/", apiMux)
-
-	// Serve embedded frontend
+	// Load embedded frontend
+	var frontendHandler http.Handler
 	distFS, err := fs.Sub(frontend.Dist, "dist")
 	if err != nil {
 		slog.Error("failed to load embedded frontend", "err", err)
-		mux.HandleFunc("/", fallbackPage)
+		frontendHandler = http.HandlerFunc(fallbackPage)
 	} else {
 		slog.Info("serving embedded frontend")
 		fileServer := http.FileServer(http.FS(distFS))
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			// Try to serve the file directly
+		frontendHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			if path == "/" {
 				path = "/index.html"
 			}
-			// Check if file exists in embedded FS
 			if f, err := distFS.Open(path[1:]); err == nil {
 				f.Close()
 				fileServer.ServeHTTP(w, r)
 				return
 			}
-			// SPA fallback: serve index.html for all unknown routes
+			// SPA fallback
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 		})
 	}
 
+	// Single top-level handler: API first, then frontend
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			apiMux.ServeHTTP(w, r)
+			return
+		}
+		frontendHandler.ServeHTTP(w, r)
+	})
+
 	return &Server{
 		httpServer: &http.Server{
 			Addr:    addr,
-			Handler: mux,
+			Handler: handler,
 		},
 		ConnMgr: connMgr,
 	}
