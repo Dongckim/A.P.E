@@ -17,6 +17,21 @@ import (
 	"github.com/dongchankim/ape/internal/sftp"
 )
 
+// ANSI color (only used for the ⏺ dot)
+const (
+	cReset  = "\033[0m"
+	cRed    = "\033[31m"
+	cGreen  = "\033[32m"
+	cYellow = "\033[33m"
+)
+
+// Status dots
+var (
+	dotOK   = cGreen + "⏺" + cReset
+	dotFail = cRed + "⏺" + cReset
+	dotWarn = cYellow + "⏺" + cReset
+)
+
 const banner = `
           ▄▄██████████▄▄
         ▄████████████████▄
@@ -64,10 +79,10 @@ func Execute() {
 	var s3Client s3.S3Client
 	s3c, err := s3.New(context.Background(), "")
 	if err != nil {
-		fmt.Println("  ⚠ S3 not available: " + err.Error())
+		fmt.Printf("  %s S3 not available: %s\n\n", dotWarn, err.Error())
 	} else {
 		s3Client = s3c
-		fmt.Println("✓ S3 client initialized")
+		fmt.Printf("  %s S3 client initialized\n\n", dotOK)
 	}
 
 	srv := server.New("127.0.0.1:9000", connMgr, s3Client)
@@ -82,7 +97,7 @@ func Execute() {
 		}
 	}()
 
-	fmt.Println("✓ Web UI ready at http://localhost:9000")
+	fmt.Printf("\n  %s Web UI ready at http://localhost:9000\n", dotOK)
 	openBrowser("http://localhost:9000")
 
 	fmt.Print(helpText)
@@ -90,11 +105,11 @@ func Execute() {
 }
 
 func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) {
-	fmt.Printf("\nConnecting to %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
+	fmt.Printf("  Connecting to %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
 
 	client, err := sftp.Connect(cfg)
 	if err != nil {
-		fmt.Printf("  ✗ Connection failed: %s\n", err)
+		fmt.Printf("  %s Connection failed: %s\n\n", dotFail, err)
 		fmt.Println("  Retrying — fix the failing field:")
 
 		errMsg := err.Error()
@@ -112,18 +127,18 @@ func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) 
 				cfg = promptConnectionFull()
 			}
 
-			fmt.Printf("\nRetrying %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
+			fmt.Printf("\n  Retrying %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
 			client, err = sftp.Connect(cfg)
 			if err == nil {
 				break
 			}
-			fmt.Printf("  ✗ Connection failed: %s\n", err)
+			fmt.Printf("  %s Connection failed: %s\n\n", dotFail, err)
 			errMsg = err.Error()
 		}
 	}
 
 	id := connMgr.Add(client)
-	fmt.Println("✓ Connected!")
+	fmt.Printf("  %s Connected!\n\n", dotOK)
 	slog.Debug("connection registered", "id", id)
 }
 
@@ -131,7 +146,7 @@ func promptConnection() sftp.ConnectConfig {
 	keyPath := promptWithDefault("SSH key path", "~/.ssh/id_rsa")
 	expanded := expandHome(keyPath)
 	if _, err := os.Stat(expanded); err != nil {
-		fmt.Printf("  ⚠ Key file not found: %s (will verify on connect)\n", keyPath)
+		fmt.Printf("  %s Key file not found: %s (will verify on connect)\n\n", dotWarn, keyPath)
 	} else {
 		keyPath = expanded
 	}
@@ -142,10 +157,10 @@ func promptConnection() sftp.ConnectConfig {
 		if host != "" {
 			break
 		}
-		fmt.Println("  ✗ Host cannot be empty")
+		fmt.Printf("  %s Host cannot be empty\n", dotFail)
 	}
 	if host == "" {
-		fmt.Println("  ✗ No host provided, exiting.")
+		fmt.Printf("  %s No host provided, exiting.\n", dotFail)
 		os.Exit(1)
 	}
 
@@ -153,7 +168,7 @@ func promptConnection() sftp.ConnectConfig {
 
 	port := promptWithDefault("SSH port", "22")
 	if !isValidPort(port) {
-		fmt.Printf("  ⚠ Invalid port '%s', using default 22\n", port)
+		fmt.Printf("  %s Invalid port '%s', using default 22\n", dotWarn, port)
 		port = "22"
 	}
 
@@ -192,7 +207,7 @@ func repl(srv *server.Server, connMgr *api.ConnectionManager) {
 			}
 			fmt.Println("\nActive connections:")
 			for i, c := range conns {
-				fmt.Printf("  [%d] %s (%s)\n", i+1, c.ID, c.Host)
+				fmt.Printf("  %s [%d] %s (%s)\n", dotOK, i+1, c.ID, c.Host)
 			}
 
 		case "/status":
@@ -203,10 +218,10 @@ func repl(srv *server.Server, connMgr *api.ConnectionManager) {
 			}
 			c := conns[0]
 			fmt.Printf("\nCurrent connection:\n")
-			fmt.Printf("  Host:     %s\n", c.Host)
-			fmt.Printf("  Username: %s\n", c.Username)
-			fmt.Printf("  Port:     %s\n", c.Port)
-			fmt.Printf("  Web UI:   http://localhost:9000\n")
+			fmt.Printf("  %s Host:     %s\n", dotOK, c.Host)
+			fmt.Printf("    Username: %s\n", c.Username)
+			fmt.Printf("    Port:     %s\n", c.Port)
+			fmt.Printf("    Web UI:   http://localhost:9000\n")
 
 		case "/h":
 			fmt.Print(helpText)
@@ -223,7 +238,7 @@ func repl(srv *server.Server, connMgr *api.ConnectionManager) {
 			continue
 
 		default:
-			fmt.Printf("Unknown command: %s (type /h for help)\n", input)
+			fmt.Printf("  %s Unknown command: %s (type /h for help)\n", dotFail, input)
 		}
 	}
 }

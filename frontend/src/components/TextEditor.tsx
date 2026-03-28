@@ -105,7 +105,7 @@ export function TextEditor({ filePath, onClose }: Props) {
             height="100%"
             language={getLang(filePath)}
             value={content}
-            onChange={(v) => setContent(v || "")}
+            onChange={(v: string | undefined) => setContent(v || "")}
             theme="vs-dark"
             options={{
               fontSize: 13,

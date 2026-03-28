@@ -5,6 +5,7 @@ project_name: ape
 before:
   hooks:
     - go mod tidy
+    - sh -c "cd frontend && npm ci && npm run build"
 
 builds:
   - main: ./main.go
