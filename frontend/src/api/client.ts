@@ -140,17 +140,17 @@ export async function removeConnection(id: string): Promise<void> {
 // --- Dashboard ---
 
 export async function fetchOverview(): Promise<DashboardOverview> {
-  return request<DashboardOverview>("/ec2/dashboard/overview");
+  return request<DashboardOverview>("/dashboard/overview");
 }
 
 export async function fetchServices(): Promise<ServicesData> {
-  return request<ServicesData>("/ec2/dashboard/services");
+  return request<ServicesData>("/dashboard/services");
 }
 
 export async function fetchGitLog(path: string): Promise<GitInfo> {
-  return request<GitInfo>(`/ec2/dashboard/git?path=${encodeURIComponent(path)}`);
+  return request<GitInfo>(`/dashboard/git?path=${encodeURIComponent(path)}`);
 }
 
 export async function fetchProcesses(): Promise<ProcessInfo[]> {
-  return request<ProcessInfo[]>("/ec2/dashboard/processes");
+  return request<ProcessInfo[]>("/dashboard/processes");
 }

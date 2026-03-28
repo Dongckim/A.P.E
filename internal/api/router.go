@@ -28,10 +28,10 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 
 	// Dashboard
 	dash := NewDashboardHandler(connMgr)
-	mux.HandleFunc("/api/ec2/dashboard/overview", dash.HandleOverview)
-	mux.HandleFunc("/api/ec2/dashboard/services", dash.HandleServices)
-	mux.HandleFunc("/api/ec2/dashboard/git", dash.HandleGitLog)
-	mux.HandleFunc("/api/ec2/dashboard/processes", dash.HandleProcesses)
+	mux.HandleFunc("/api/dashboard/overview", dash.HandleOverview)
+	mux.HandleFunc("/api/dashboard/services", dash.HandleServices)
+	mux.HandleFunc("/api/dashboard/git", dash.HandleGitLog)
+	mux.HandleFunc("/api/dashboard/processes", dash.HandleProcesses)
 
 	// S3 operations
 	if s3Client != nil {
