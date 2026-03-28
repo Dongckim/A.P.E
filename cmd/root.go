@@ -36,6 +36,7 @@ const banner = `
 
          AWS Platform Explorer
                v0.1.0
+
 `
 
 const helpText = `
@@ -54,6 +55,7 @@ var reader *bufio.Reader
 func Execute() {
 	reader = bufio.NewReader(os.Stdin)
 
+	fmt.Print("\033[2J\033[H") // clear screen, cursor to top
 	fmt.Print(banner)
 
 	connMgr := api.NewConnectionManager()
@@ -98,7 +100,7 @@ func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) 
 		errMsg := err.Error()
 		for {
 			if strings.Contains(errMsg, "failed to load SSH key") || strings.Contains(errMsg, "passphrase") {
-				cfg.KeyPath = promptWithDefault("SSH key path", cfg.KeyPath)
+				cfg.KeyPath = promptWithDefault("SSH key path", "~/.ssh/id_rsa")
 				if strings.Contains(errMsg, "passphrase") {
 					cfg.Passphrase = promptRequired("Key passphrase")
 				}
@@ -229,7 +231,7 @@ func repl(srv *server.Server, connMgr *api.ConnectionManager) {
 func promptWithDefault(label, defaultVal string) string {
 	fmt.Printf("? %s (%s): ", label, defaultVal)
 	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
+	input = cleanInput(input)
 	if input == "" {
 		return defaultVal
 	}
@@ -239,7 +241,16 @@ func promptWithDefault(label, defaultVal string) string {
 func promptRequired(label string) string {
 	fmt.Printf("? %s: ", label)
 	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
+	return cleanInput(input)
+}
+
+func cleanInput(s string) string {
+	s = strings.TrimSpace(s)
+	// Strip surrounding quotes (single or double)
+	if len(s) >= 2 && ((s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"')) {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }
 
 func expandHome(path string) string {

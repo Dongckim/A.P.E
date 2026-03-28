@@ -15,8 +15,8 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 	// Health
 	mux.HandleFunc("/api/health", HandleHealth)
 
-	// Connection management
-	mux.HandleFunc("/api/connections", connMgr.HandleListConnections)
+	// Connection management (GET list, DELETE remove)
+	mux.HandleFunc("/api/connections", connMgr.HandleConnections)
 
 	// EC2 file operations
 	mux.HandleFunc("/api/ec2/files", ec2.HandleListFiles)      // GET  ?path=
@@ -29,8 +29,12 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 	// S3 operations
 	if s3Client != nil {
 		s3h := NewS3Handler(s3Client)
-		mux.HandleFunc("/api/s3/buckets", s3h.HandleListBuckets) // GET
-		mux.HandleFunc("/api/s3/objects", s3h.HandleListObjects)  // GET ?bucket=&prefix=
+		mux.HandleFunc("/api/s3/buckets", s3h.HandleListBuckets)     // GET
+		mux.HandleFunc("/api/s3/objects", s3h.HandleListObjects)     // GET  ?bucket=&prefix=
+		mux.HandleFunc("/api/s3/upload", s3h.HandleUploadObject)     // POST ?bucket=&key= multipart
+		mux.HandleFunc("/api/s3/download", s3h.HandleDownloadObject) // GET  ?bucket=&key=
+		mux.HandleFunc("/api/s3/object", s3h.HandleDeleteObject)     // DELETE ?bucket=&key=
+		mux.HandleFunc("/api/s3/presign", s3h.HandlePresignDownload) // GET  ?bucket=&key=&expiry=
 	}
 
 	return mux

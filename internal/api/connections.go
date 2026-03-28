@@ -83,6 +83,27 @@ func (m *ConnectionManager) List() []ConnectionInfo {
 	return infos
 }
 
+// Remove disconnects and removes a single connection by ID.
+func (m *ConnectionManager) Remove(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.connections[id]
+	if !ok {
+		return false
+	}
+	c.Close()
+	delete(m.connections, id)
+
+	for i, oid := range m.order {
+		if oid == id {
+			m.order = append(m.order[:i], m.order[i+1:]...)
+			break
+		}
+	}
+	return true
+}
+
 // CloseAll disconnects every active session.
 func (m *ConnectionManager) CloseAll() {
 	m.mu.Lock()
@@ -94,13 +115,27 @@ func (m *ConnectionManager) CloseAll() {
 	m.order = nil
 }
 
-// HandleListConnections handles GET /api/connections
-func (m *ConnectionManager) HandleListConnections(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+// HandleConnections handles /api/connections (GET list, DELETE remove by ?id=)
+func (m *ConnectionManager) HandleConnections(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, m.List())
+
+	case http.MethodDelete:
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "id is required")
+			return
+		}
+		if !m.Remove(id) {
+			writeError(w, http.StatusNotFound, "connection not found: "+id)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"disconnected": id})
+
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
-	writeJSON(w, http.StatusOK, m.List())
 }
 
 // HandleHealth handles GET /api/health

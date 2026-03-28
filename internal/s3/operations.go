@@ -3,7 +3,9 @@ package s3
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -104,4 +106,58 @@ func (c *Client) ListObjects(ctx context.Context, bucket, prefix string) (*Objec
 		Objects:     objects,
 		IsTruncated: aws.ToBool(out.IsTruncated),
 	}, nil
+}
+
+// UploadObject uploads data from a reader to an S3 object.
+func (c *Client) UploadObject(ctx context.Context, bucket, key string, reader io.Reader) error {
+	_, err := c.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   reader,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload %s/%s: %w", bucket, key, err)
+	}
+	return nil
+}
+
+// DownloadObject streams an S3 object into the provided writer.
+func (c *Client) DownloadObject(ctx context.Context, bucket, key string, w io.Writer) error {
+	out, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to download %s/%s: %w", bucket, key, err)
+	}
+	defer out.Body.Close()
+
+	if _, err := io.Copy(w, out.Body); err != nil {
+		return fmt.Errorf("failed to stream %s/%s: %w", bucket, key, err)
+	}
+	return nil
+}
+
+// DeleteObject removes an object from S3.
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) error {
+	_, err := c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete %s/%s: %w", bucket, key, err)
+	}
+	return nil
+}
+
+// PresignDownload generates a presigned URL for downloading an S3 object.
+func (c *Client) PresignDownload(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	req, err := c.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("failed to presign %s/%s: %w", bucket, key, err)
+	}
+	return req.URL, nil
 }
