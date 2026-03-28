@@ -27,6 +27,8 @@ $ ape
 
 One binary. Connect via SSH. Get a Finder-like GUI at `localhost:9000`.
 
+![A.P.E Demo](docs/demo.gif)
+
 ## Quick Start
 
 ```bash
