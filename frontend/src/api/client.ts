@@ -1,4 +1,4 @@
-import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo } from "../types";
+import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo } from "../types";
 
 const BASE = "/api";
 
@@ -129,4 +129,22 @@ export async function listConnections(): Promise<ConnectionInfo[]> {
 
 export async function removeConnection(id: string): Promise<void> {
   await request(`/connections?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// --- Dashboard ---
+
+export async function fetchOverview(): Promise<DashboardOverview> {
+  return request<DashboardOverview>("/ec2/dashboard/overview");
+}
+
+export async function fetchServices(): Promise<ServicesData> {
+  return request<ServicesData>("/ec2/dashboard/services");
+}
+
+export async function fetchGitLog(path: string): Promise<GitInfo> {
+  return request<GitInfo>(`/ec2/dashboard/git?path=${encodeURIComponent(path)}`);
+}
+
+export async function fetchProcesses(): Promise<ProcessInfo[]> {
+  return request<ProcessInfo[]>("/ec2/dashboard/processes");
 }

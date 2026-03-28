@@ -1,6 +1,8 @@
 package sftp
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -25,6 +28,7 @@ type SFTPClient interface {
 	RenameFile(oldPath, newPath string) error
 	Stat(path string) (*FileInfo, error)
 	MkdirAll(path string) error
+	Exec(ctx context.Context, cmd string) (string, int, error)
 	Close() error
 }
 
@@ -85,6 +89,46 @@ func Connect(cfg ConnectConfig) (*Client, error) {
 		sftpClient: sftpConn,
 		config:     cfg,
 	}, nil
+}
+
+// Exec runs a shell command on the remote server via SSH.
+// Returns stdout, exit code, and any error. Times out based on context.
+func (c *Client) Exec(ctx context.Context, cmd string) (string, int, error) {
+	session, err := c.sshClient.NewSession()
+	if err != nil {
+		return "", -1, fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+
+	// Default 5s timeout if context has no deadline
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(cmd) }()
+
+	select {
+	case <-ctx.Done():
+		session.Signal(ssh.SIGKILL)
+		return stdout.String(), -1, fmt.Errorf("command timed out: %s", cmd)
+	case err := <-done:
+		exitCode := 0
+		if err != nil {
+			if exitErr, ok := err.(*ssh.ExitError); ok {
+				exitCode = exitErr.ExitStatus()
+			} else {
+				return stdout.String(), -1, err
+			}
+		}
+		return stdout.String(), exitCode, nil
+	}
 }
 
 // Close shuts down the SFTP session and SSH connection.

@@ -26,6 +26,13 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 	mux.HandleFunc("/api/ec2/mkdir", ec2.HandleMkdir)           // POST ?path=
 	mux.HandleFunc("/api/ec2/stat", ec2.HandleStat)             // GET  ?path=
 
+	// Dashboard
+	dash := NewDashboardHandler(connMgr)
+	mux.HandleFunc("/api/ec2/dashboard/overview", dash.HandleOverview)
+	mux.HandleFunc("/api/ec2/dashboard/services", dash.HandleServices)
+	mux.HandleFunc("/api/ec2/dashboard/git", dash.HandleGitLog)
+	mux.HandleFunc("/api/ec2/dashboard/processes", dash.HandleProcesses)
+
 	// S3 operations
 	if s3Client != nil {
 		s3h := NewS3Handler(s3Client)

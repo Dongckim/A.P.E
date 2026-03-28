@@ -1,9 +1,25 @@
-import { Monitor, HardDrive, Plus, Settings } from "lucide-react";
+import { Monitor, HardDrive, Plus, Settings, LayoutDashboard } from "lucide-react";
+
+type View = "dashboard" | "ec2" | "s3";
 
 interface Props {
-  activeView: "ec2" | "s3";
-  onViewChange: (view: "ec2" | "s3") => void;
+  activeView: View;
+  onViewChange: (view: View) => void;
   onOpenConnections: () => void;
+}
+
+function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof Monitor; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
+        active ? "bg-cyan-500/10 text-cyan-400" : "text-slate-400 hover:bg-slate-800"
+      }`}
+    >
+      <Icon size={14} />
+      <span className="truncate">{label}</span>
+    </button>
+  );
 }
 
 export function Sidebar({ activeView, onViewChange, onOpenConnections }: Props) {
@@ -23,36 +39,10 @@ export function Sidebar({ activeView, onViewChange, onOpenConnections }: Props) 
         </button>
       </div>
 
-      <div className="p-3 flex-1 overflow-y-auto">
-        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2 px-1">
-          EC2 Connections
-        </p>
-        <button
-          onClick={() => onViewChange("ec2")}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-            activeView === "ec2"
-              ? "bg-cyan-500/10 text-cyan-400"
-              : "text-slate-400 hover:bg-slate-800"
-          }`}
-        >
-          <Monitor size={14} />
-          <span className="truncate">File Explorer</span>
-        </button>
-
-        <p className="text-[10px] uppercase tracking-wider text-slate-500 mt-4 mb-2 px-1">
-          S3 Buckets
-        </p>
-        <button
-          onClick={() => onViewChange("s3")}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-            activeView === "s3"
-              ? "bg-cyan-500/10 text-cyan-400"
-              : "text-slate-400 hover:bg-slate-800"
-          }`}
-        >
-          <HardDrive size={14} />
-          <span className="truncate">S3 Browser</span>
-        </button>
+      <div className="p-3 flex-1 overflow-y-auto space-y-1">
+        <NavButton active={activeView === "dashboard"} icon={LayoutDashboard} label="Dashboard" onClick={() => onViewChange("dashboard")} />
+        <NavButton active={activeView === "ec2"} icon={Monitor} label="File Explorer" onClick={() => onViewChange("ec2")} />
+        <NavButton active={activeView === "s3"} icon={HardDrive} label="S3 Browser" onClick={() => onViewChange("s3")} />
       </div>
 
       <div className="p-3 border-t border-slate-700">
