@@ -31,13 +31,23 @@ One binary. Connect via SSH. Get a Finder-like GUI at `localhost:9000`.
 
 ## Quick Start
 
+### Homebrew (macOS)
+
 ```bash
-# Download (macOS Apple Silicon)
+brew tap dongckim/tap
+brew install ape
+ape
+```
+
+### Manual Download
+
+```bash
+# macOS Apple Silicon
 curl -sL https://github.com/Dongckim/A.P.E/releases/latest/download/ape-darwin-arm64.tar.gz | tar xz
 ./ape
 ```
 
-Or build from source:
+### Build from Source
 
 ```bash
 git clone https://github.com/Dongckim/A.P.E.git && cd A.P.E

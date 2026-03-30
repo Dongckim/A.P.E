@@ -36,6 +36,20 @@ changelog:
       - '^test:'
       - '^ci:'
 
+brews:
+  - repository:
+      owner: Dongckim
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    name: ape
+    homepage: https://github.com/Dongckim/A.P.E
+    description: "AWS Platform Explorer — browse EC2 files and S3 buckets from your browser"
+    license: MIT
+    install: |
+      bin.install "ape"
+    test: |
+      assert_match "A.P.E", shell_output("#{bin}/ape --version 2>&1", 1)
+
 release:
   github:
     owner: Dongckim
