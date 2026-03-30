@@ -41,7 +41,7 @@ brews:
       owner: Dongckim
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    name: ape
+    name: ape-gui
     homepage: https://github.com/Dongckim/A.P.E
     description: "AWS Platform Explorer — browse EC2 files and S3 buckets from your browser"
     license: MIT

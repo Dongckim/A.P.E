@@ -35,7 +35,7 @@ One binary. Connect via SSH. Get a Finder-like GUI at `localhost:9000`.
 
 ```bash
 brew tap dongckim/tap
-brew install ape
+brew install ape-gui
 ape
 ```
 
