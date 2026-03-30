@@ -8,6 +8,8 @@
 
 **AWS Platform Explorer** — browse EC2 files and S3 buckets from your browser.
 
+> Tired of typing `scp` commands and switching between terminal tabs to manage EC2 files? A.P.E gives you a visual file manager that runs locally and just works.
+
 ```
 $ ape
 
