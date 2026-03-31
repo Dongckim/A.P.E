@@ -161,7 +161,7 @@ export function FileExplorer() {
         else setSelected(new Set());
       }
       // ?: show keyboard shortcuts
-      if (e.key === "?") {
+      if (e.key === "?" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
         setShowShortcuts(true);
       }
     };
