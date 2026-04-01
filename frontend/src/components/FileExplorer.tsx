@@ -1,3 +1,4 @@
+import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { FileInfo, ViewMode } from "../types";
 import { Breadcrumb } from "./Breadcrumb";
@@ -33,6 +34,9 @@ export function FileExplorer() {
 
   // Editor
   const [editingFile, setEditingFile] = useState<string | null>(null);
+
+  // Keyboard shortcuts modal
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -152,8 +156,13 @@ export function FileExplorer() {
       }
       // Escape: close editor / deselect
       if (e.key === "Escape") {
-        if (editingFile) setEditingFile(null);
+        if (showShortcuts) setShowShortcuts(false);
+        else if (editingFile) setEditingFile(null);
         else setSelected(new Set());
+      }
+      // ?: show keyboard shortcuts
+      if (e.key === "?" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        setShowShortcuts(true);
       }
     };
     window.addEventListener("keydown", handler);
@@ -249,6 +258,9 @@ export function FileExplorer() {
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+      {showShortcuts && (
+        <KeyboardShortcutsModal onClose={() => setShowShortcuts(false)} />
       )}
     </div>
   );
