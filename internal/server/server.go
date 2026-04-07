@@ -10,16 +10,18 @@ import (
 
 	"github.com/dongchankim/ape/frontend"
 	"github.com/dongchankim/ape/internal/api"
+	"github.com/dongchankim/ape/internal/postgres"
 	"github.com/dongchankim/ape/internal/s3"
 )
 
 type Server struct {
 	httpServer *http.Server
 	ConnMgr    *api.ConnectionManager
+	PGClient   postgres.Client
 }
 
-func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client) *Server {
-	apiMux := api.NewRouter(connMgr, s3Client)
+func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgClient postgres.Client) *Server {
+	apiMux := api.NewRouter(connMgr, s3Client, pgClient)
 
 	// Load embedded frontend
 	var frontendHandler http.Handler
@@ -60,7 +62,8 @@ func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client) *Ser
 			Addr:    addr,
 			Handler: handler,
 		},
-		ConnMgr: connMgr,
+		ConnMgr:  connMgr,
+		PGClient: pgClient,
 	}
 }
 
@@ -92,6 +95,9 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown() error {
 	s.ConnMgr.CloseAll()
+	if s.PGClient != nil {
+		_ = s.PGClient.Close()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.httpServer.Shutdown(ctx)

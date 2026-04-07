@@ -110,3 +110,18 @@ export interface ProcessInfo {
   memory: number;
   command: string;
 }
+
+export interface RDSSchemaSummary {
+  name: string;
+  table_count: number;
+}
+
+export interface RDSOverview {
+  version: string;
+  current_db: string;
+  schema_count: number;
+  table_count: number;
+  schemas: RDSSchemaSummary[];
+  connected: boolean;
+  error?: string;
+}

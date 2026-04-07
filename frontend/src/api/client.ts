@@ -1,4 +1,4 @@
-import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo } from "../types";
+import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo, RDSOverview } from "../types";
 
 const BASE = "/api";
 
@@ -153,4 +153,10 @@ export async function fetchGitLog(path: string): Promise<GitInfo> {
 
 export async function fetchProcesses(): Promise<ProcessInfo[]> {
   return request<ProcessInfo[]>("/dashboard/processes");
+}
+
+// --- RDS / PostgreSQL ---
+
+export async function fetchRDSOverview(): Promise<RDSOverview> {
+  return request<RDSOverview>("/rds/overview");
 }

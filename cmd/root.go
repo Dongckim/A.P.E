@@ -13,6 +13,7 @@ import (
 
 	"github.com/dongchankim/ape/internal/api"
 	"github.com/dongchankim/ape/internal/config"
+	"github.com/dongchankim/ape/internal/postgres"
 	"github.com/dongchankim/ape/internal/s3"
 	"github.com/dongchankim/ape/internal/server"
 	"github.com/dongchankim/ape/internal/sftp"
@@ -86,7 +87,17 @@ func Execute() {
 		fmt.Printf("  %s S3 client initialized\n\n", dotOK)
 	}
 
-	srv := server.New("127.0.0.1:9000", connMgr, s3Client)
+	// Initialize PostgreSQL client (optional; enabled via env var)
+	var pgClient postgres.Client
+	pgc, err := postgres.NewFromEnv(context.Background())
+	if err != nil {
+		fmt.Printf("  %s PostgreSQL not available: %s\n\n", dotWarn, err.Error())
+	} else {
+		pgClient = pgc
+		fmt.Printf("  %s PostgreSQL client initialized\n\n", dotOK)
+	}
+
+	srv := server.New("127.0.0.1:9000", connMgr, s3Client, pgClient)
 
 	cfg := promptOrSelectConnection()
 	connectAndRegister(cfg, connMgr)

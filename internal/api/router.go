@@ -3,11 +3,12 @@ package api
 import (
 	"net/http"
 
+	"github.com/dongchankim/ape/internal/postgres"
 	"github.com/dongchankim/ape/internal/s3"
 )
 
 // NewRouter creates the API route multiplexer.
-func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux {
+func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgClient postgres.Client) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	ec2 := NewEC2Handler(connMgr)
@@ -19,7 +20,7 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 	mux.HandleFunc("/api/connections", connMgr.HandleConnections)
 
 	// EC2 file operations
-	mux.HandleFunc("/api/ec2/files", ec2.HandleListFiles)      // GET  ?path=
+	mux.HandleFunc("/api/ec2/files", ec2.HandleListFiles)       // GET  ?path=
 	mux.HandleFunc("/api/ec2/file", ec2.handleFile)             // GET/PUT/DELETE/PATCH ?path=
 	mux.HandleFunc("/api/ec2/upload", ec2.HandleUploadFile)     // POST multipart
 	mux.HandleFunc("/api/ec2/download", ec2.HandleDownloadFile) // GET  ?path=
@@ -42,6 +43,12 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client) *http.ServeMux 
 		mux.HandleFunc("/api/s3/download", s3h.HandleDownloadObject) // GET  ?bucket=&key=
 		mux.HandleFunc("/api/s3/object", s3h.HandleDeleteObject)     // DELETE ?bucket=&key=
 		mux.HandleFunc("/api/s3/presign", s3h.HandlePresignDownload) // GET  ?bucket=&key=&expiry=
+	}
+
+	// RDS PostgreSQL operations
+	if pgClient != nil {
+		rds := NewRDSHandler(pgClient)
+		mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET
 	}
 
 	return mux
