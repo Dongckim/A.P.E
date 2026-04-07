@@ -98,6 +98,9 @@ func Execute() {
 	}
 
 	srv := server.New("127.0.0.1:9000", connMgr, s3Client, pgClient)
+	if srv.FrontendStaleHint != "" {
+		fmt.Printf("  %s %s\n\n", dotWarn, srv.FrontendStaleHint)
+	}
 
 	cfg := promptOrSelectConnection()
 	connectAndRegister(cfg, connMgr)

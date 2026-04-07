@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ type Server struct {
 	httpServer *http.Server
 	ConnMgr    *api.ConnectionManager
 	PGClient   postgres.Client
+	// FrontendStaleHint is set when the embedded dist predates new UI (non-empty).
+	FrontendStaleHint string
 }
 
 func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgClient postgres.Client) *Server {
@@ -25,12 +28,17 @@ func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgCl
 
 	// Load embedded frontend
 	var frontendHandler http.Handler
+	var frontendStaleHint string
 	distFS, err := fs.Sub(frontend.Dist, "dist")
 	if err != nil {
 		slog.Error("failed to load embedded frontend", "err", err)
 		frontendHandler = http.HandlerFunc(fallbackPage)
 	} else {
 		slog.Info("serving embedded frontend")
+		frontendStaleHint = staleEmbeddedFrontendHint(distFS)
+		if frontendStaleHint != "" {
+			slog.Warn(frontendStaleHint)
+		}
 		fileServer := http.FileServer(http.FS(distFS))
 		frontendHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -62,9 +70,42 @@ func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgCl
 			Addr:    addr,
 			Handler: handler,
 		},
-		ConnMgr:  connMgr,
-		PGClient: pgClient,
+		ConnMgr:           connMgr,
+		PGClient:          pgClient,
+		FrontendStaleHint: frontendStaleHint,
 	}
+}
+
+func staleEmbeddedFrontendHint(distFS fs.FS) string {
+	if !embeddedBundleContains(distFS, "RDS PostgreSQL") {
+		return "Embedded UI was built before RDS — run: cd frontend && npm ci && npm run build — then start A.P.E again (or: make dev)."
+	}
+	return ""
+}
+
+func embeddedBundleContains(distFS fs.FS, needle string) bool {
+	found := false
+	_ = fs.WalkDir(distFS, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		switch path.Ext(p) {
+		case ".js", ".html", ".css":
+			b, err := fs.ReadFile(distFS, p)
+			if err != nil {
+				return nil
+			}
+			if strings.Contains(string(b), needle) {
+				found = true
+				return fs.SkipAll
+			}
+		}
+		return nil
+	})
+	return found
 }
 
 func fallbackPage(w http.ResponseWriter, r *http.Request) {
