@@ -46,10 +46,8 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgClient postgr
 	}
 
 	// RDS PostgreSQL operations
-	if pgClient != nil {
-		rds := NewRDSHandler(pgClient)
-		mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET
-	}
+	rds := NewRDSHandler(pgClient)
+	mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET
 
 	return mux
 }

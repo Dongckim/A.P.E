@@ -58,8 +58,15 @@ export function RDSOverviewPanel() {
 
         {!loading && !error && data && (
           <>
+            {!data.connected && (
+              <div className="flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{data.error || "RDS is not connected."}</span>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Database" value={data.current_db} />
+              <StatCard label="Database" value={data.current_db || "-"} />
               <StatCard label="Schemas" value={String(data.schema_count)} />
               <StatCard label="Tables" value={String(data.table_count)} />
               <StatCard label="Connected" value={data.connected ? "Yes" : "No"} />
@@ -69,7 +76,7 @@ export function RDSOverviewPanel() {
               <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
                 PostgreSQL Version
               </div>
-              <div className="px-3 py-2 text-sm text-slate-200 break-all">{data.version}</div>
+              <div className="px-3 py-2 text-sm text-slate-200 break-all">{data.version || "-"}</div>
             </div>
 
             <div className="rounded border border-slate-700 bg-slate-900/40 overflow-hidden">
