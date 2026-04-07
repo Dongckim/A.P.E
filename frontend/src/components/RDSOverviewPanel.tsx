@@ -56,58 +56,64 @@ export function RDSOverviewPanel() {
           </div>
         )}
 
-        {!loading && !error && data && (
-          <>
-            {!data.connected && (
-              <div className="flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                <span>{data.error || "RDS is not connected."}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard label="Database" value={data.current_db || "-"} />
-              <StatCard label="Schemas" value={String(data.schema_count)} />
-              <StatCard label="Tables" value={String(data.table_count)} />
-              <StatCard label="Connected" value={data.connected ? "Yes" : "No"} />
-            </div>
-
-            <div className="rounded border border-slate-700 bg-slate-900/40">
-              <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
-                PostgreSQL Version
-              </div>
-              <div className="px-3 py-2 text-sm text-slate-200 break-all">{data.version || "-"}</div>
-            </div>
-
-            <div className="rounded border border-slate-700 bg-slate-900/40 overflow-hidden">
-              <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
-                Top Schemas by Table Count
-              </div>
-              {data.schemas.length === 0 ? (
-                <div className="px-3 py-6 text-sm text-slate-500 text-center">No user schemas found.</div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="text-slate-400 bg-slate-800/30">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">Schema</th>
-                      <th className="text-right px-3 py-2 font-medium">Tables</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.schemas.map((schema) => (
-                      <tr key={schema.name} className="border-t border-slate-800">
-                        <td className="px-3 py-2 text-slate-200">{schema.name}</td>
-                        <td className="px-3 py-2 text-right text-slate-300">{schema.table_count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
+        {!loading && !error && data && <RDSOverviewLoaded data={data} />}
       </div>
     </div>
+  );
+}
+
+function RDSOverviewLoaded({ data }: { data: RDSOverview }) {
+  const schemas = data.schemas ?? [];
+
+  return (
+    <>
+      {!data.connected && (
+        <div className="flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{data.error || "RDS is not connected."}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard label="Database" value={data.current_db || "-"} />
+        <StatCard label="Schemas" value={String(data.schema_count)} />
+        <StatCard label="Tables" value={String(data.table_count)} />
+        <StatCard label="Connected" value={data.connected ? "Yes" : "No"} />
+      </div>
+
+      <div className="rounded border border-slate-700 bg-slate-900/40">
+        <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
+          PostgreSQL Version
+        </div>
+        <div className="px-3 py-2 text-sm text-slate-200 break-all">{data.version || "-"}</div>
+      </div>
+
+      <div className="rounded border border-slate-700 bg-slate-900/40 overflow-hidden">
+        <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
+          Top Schemas by Table Count
+        </div>
+        {schemas.length === 0 ? (
+          <div className="px-3 py-6 text-sm text-slate-500 text-center">No user schemas found.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-slate-400 bg-slate-800/30">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">Schema</th>
+                <th className="text-right px-3 py-2 font-medium">Tables</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schemas.map((schema) => (
+                <tr key={schema.name} className="border-t border-slate-800">
+                  <td className="px-3 py-2 text-slate-200">{schema.name}</td>
+                  <td className="px-3 py-2 text-right text-slate-300">{schema.table_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }
 

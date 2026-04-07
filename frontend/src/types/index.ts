@@ -121,7 +121,8 @@ export interface RDSOverview {
   current_db: string;
   schema_count: number;
   table_count: number;
-  schemas: RDSSchemaSummary[];
+  /** Always an array from current API; may be null from older responses. */
+  schemas?: RDSSchemaSummary[] | null;
   connected: boolean;
   error?: string;
 }

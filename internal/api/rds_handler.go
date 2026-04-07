@@ -39,43 +39,28 @@ func (h *RDSHandler) HandleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.client == nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "PostgreSQL is not configured. Set APE_PG_DSN and restart A.P.E.",
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("PostgreSQL is not configured. Set APE_PG_DSN and restart A.P.E."))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	out := RDSOverview{Connected: true}
+	out := RDSOverview{Connected: true, Schemas: []RDSSchemaSummary{}}
 
 	if err := h.client.QueryRowContext(ctx, "SELECT version()").Scan(&out.Version); err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to read postgres version: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to read postgres version: "+err.Error()))
 		return
 	}
 	if err := h.client.QueryRowContext(ctx, "SELECT current_database()").Scan(&out.CurrentDB); err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to read current database: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to read current database: "+err.Error()))
 		return
 	}
 	if err := h.client.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata").Scan(&out.SchemaCount); err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to count schemas: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to count schemas: "+err.Error()))
 		return
 	}
 	if err := h.client.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_type='BASE TABLE'").Scan(&out.TableCount); err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to count tables: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to count tables: "+err.Error()))
 		return
 	}
 
@@ -89,10 +74,7 @@ func (h *RDSHandler) HandleOverview(w http.ResponseWriter, r *http.Request) {
 		LIMIT 20
 	`)
 	if err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to query schema overview: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to query schema overview: "+err.Error()))
 		return
 	}
 	defer rows.Close()
@@ -100,21 +82,23 @@ func (h *RDSHandler) HandleOverview(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s RDSSchemaSummary
 		if err := rows.Scan(&s.Name, &s.TableCount); err != nil {
-			writeJSON(w, http.StatusOK, RDSOverview{
-				Connected:    false,
-				ErrorMessage: "failed to parse schema overview: " + err.Error(),
-			})
+			writeJSON(w, http.StatusOK, rdsOverviewError("failed to parse schema overview: "+err.Error()))
 			return
 		}
 		out.Schemas = append(out.Schemas, s)
 	}
 	if err := rows.Err(); err != nil {
-		writeJSON(w, http.StatusOK, RDSOverview{
-			Connected:    false,
-			ErrorMessage: "failed to read schema overview rows: " + err.Error(),
-		})
+		writeJSON(w, http.StatusOK, rdsOverviewError("failed to read schema overview rows: "+err.Error()))
 		return
 	}
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+func rdsOverviewError(msg string) RDSOverview {
+	return RDSOverview{
+		Connected:    false,
+		ErrorMessage: msg,
+		Schemas:      []RDSSchemaSummary{},
+	}
 }
