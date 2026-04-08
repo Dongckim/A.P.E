@@ -136,6 +136,25 @@ export interface RDSTablesResponse {
   tables: RDSTableSummary[];
 }
 
+export interface RDSColumnInfo {
+  name: string;
+  data_type: string;
+  is_nullable: boolean;
+  default_value: string | null;
+  is_primary_key: boolean;
+  position: number;
+}
+
+export interface RDSTableDetail {
+  database: string;
+  schema: string;
+  table: string;
+  columns: RDSColumnInfo[];
+  sample_rows: unknown[][];
+  sample_limit: number;
+  row_estimate: number;
+}
+
 export interface RDSOverview {
   version: string;
   current_db: string;

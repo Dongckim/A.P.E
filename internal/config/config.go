@@ -16,8 +16,23 @@ type SavedConnection struct {
 	KeyPath  string `yaml:"key_path"`
 }
 
+// SavedRDSConnection persists everything needed to reconnect to an RDS
+// PostgreSQL instance EXCEPT the password, which is always re-prompted.
+// Tunnel=true means the connection should go through whichever EC2 SSH
+// session is active at startup.
+type SavedRDSConnection struct {
+	Name     string `yaml:"name"`
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Username string `yaml:"username"`
+	Database string `yaml:"database"`
+	SSLMode  string `yaml:"sslmode"`
+	Tunnel   bool   `yaml:"tunnel"`
+}
+
 type Config struct {
-	Connections []SavedConnection `yaml:"connections"`
+	Connections    []SavedConnection    `yaml:"connections"`
+	RDSConnections []SavedRDSConnection `yaml:"rds_connections,omitempty"`
 }
 
 func configPath() (string, error) {
@@ -88,6 +103,29 @@ func (c *Config) RemoveConnection(name string) bool {
 	for i, conn := range c.Connections {
 		if conn.Name == name {
 			c.Connections = append(c.Connections[:i], c.Connections[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// AddRDSConnection appends an RDS connection and saves. Overwrites if same
+// name exists.
+func (c *Config) AddRDSConnection(conn SavedRDSConnection) {
+	for i, existing := range c.RDSConnections {
+		if existing.Name == conn.Name {
+			c.RDSConnections[i] = conn
+			return
+		}
+	}
+	c.RDSConnections = append(c.RDSConnections, conn)
+}
+
+// RemoveRDSConnection removes an RDS connection by name.
+func (c *Config) RemoveRDSConnection(name string) bool {
+	for i, conn := range c.RDSConnections {
+		if conn.Name == name {
+			c.RDSConnections = append(c.RDSConnections[:i], c.RDSConnections[i+1:]...)
 			return true
 		}
 	}

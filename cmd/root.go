@@ -282,6 +282,10 @@ func promptConnectionFull() sftp.ConnectConfig {
 // instance and gathers credentials interactively. Returns nil if the user
 // declines or retries are exhausted. If APE_PG_DSN is set, it is used directly.
 //
+// If saved RDS connections exist in ~/.ape/config.yaml, the user is shown a
+// menu to pick one (the password is always re-prompted; only host/port/user/
+// db/sslmode/tunnel are persisted).
+//
 // If bastion is non-nil and the user opts in, ape opens an in-process SSH
 // tunnel through the EC2 connection (no separate `ssh -L` terminal needed):
 // it binds a random local port on 127.0.0.1, forwards each accepted
@@ -304,10 +308,49 @@ func promptRDSConnection(bastion *sftp.Client) *postgres.Factory {
 		return factory
 	}
 
-	answer := promptWithDefault("Connect to RDS PostgreSQL? (y/N)", "N")
-	if !strings.EqualFold(answer, "y") {
-		fmt.Printf("  %s RDS skipped\n\n", dotWarn)
-		return nil
+	// Show saved RDS connections if any.
+	savedCfg, _ := config.Load()
+	saved := []config.SavedRDSConnection{}
+	if savedCfg != nil {
+		saved = savedCfg.RDSConnections
+	}
+
+	if len(saved) > 0 {
+		fmt.Println()
+		fmt.Println("  Saved RDS connections:")
+		for i, c := range saved {
+			tunnelMark := ""
+			if c.Tunnel {
+				tunnelMark = " [tunneled]"
+			}
+			fmt.Printf("    [%d] %s — %s@%s:%s/%s%s\n", i+1, c.Name, c.Username, c.Host, c.Port, c.Database, tunnelMark)
+		}
+		fmt.Printf("    [N] New RDS connection\n")
+		fmt.Printf("    [S] Skip RDS\n\n")
+
+		choice := promptWithDefault("Select RDS connection", "S")
+		if strings.EqualFold(choice, "s") || choice == "" {
+			fmt.Printf("  %s RDS skipped\n\n", dotWarn)
+			return nil
+		}
+		if !strings.EqualFold(choice, "n") {
+			idx := 0
+			if _, err := fmt.Sscanf(choice, "%d", &idx); err == nil && idx >= 1 && idx <= len(saved) {
+				if f := connectFromSavedRDS(saved[idx-1], bastion); f != nil {
+					return f
+				}
+				// Fall through to new connection prompt on failure.
+				fmt.Println("  Falling back to new connection setup.")
+			} else {
+				fmt.Printf("  %s Invalid choice, starting new connection\n", dotWarn)
+			}
+		}
+	} else {
+		answer := promptWithDefault("Connect to RDS PostgreSQL? (y/N)", "N")
+		if !strings.EqualFold(answer, "y") {
+			fmt.Printf("  %s RDS skipped\n\n", dotWarn)
+			return nil
+		}
 	}
 
 	// Decide whether to tunnel through the EC2 SSH connection.
@@ -378,6 +421,7 @@ func promptRDSConnection(bastion *sftp.Client) *postgres.Factory {
 		if err == nil {
 			if _, perr := factory.Get(context.Background(), ""); perr == nil {
 				fmt.Printf("  %s PostgreSQL connected%s\n\n", dotOK, tunnelLabel)
+				promptSaveRDSConnection(rdsHost, rdsPort, username, database, sslmode, useTunnel)
 				return factory
 			} else {
 				err = perr
@@ -391,6 +435,100 @@ func promptRDSConnection(bastion *sftp.Client) *postgres.Factory {
 			return nil
 		}
 	}
+}
+
+// connectFromSavedRDS reuses a saved RDS connection: it opens the SSH tunnel
+// (if the saved entry was tunneled), prompts only for the password, and
+// returns the resulting Factory. Returns nil on failure (caller may fall
+// back to the new-connection prompt).
+func connectFromSavedRDS(sc config.SavedRDSConnection, bastion *sftp.Client) *postgres.Factory {
+	fmt.Printf("\n  Using saved RDS: %s (%s@%s:%s/%s)\n", sc.Name, sc.Username, sc.Host, sc.Port, sc.Database)
+
+	dialHost, dialPort := sc.Host, sc.Port
+	tunnelLabel := ""
+	if sc.Tunnel {
+		if bastion == nil {
+			fmt.Printf("  %s This RDS was saved with tunnel=true but no EC2 connection is active.\n", dotWarn)
+			return nil
+		}
+		remoteAddr := net.JoinHostPort(sc.Host, sc.Port)
+		fmt.Printf("  Opening SSH tunnel to %s ...\n", remoteAddr)
+		localAddr, err := bastion.StartLocalForward(remoteAddr)
+		if err != nil {
+			fmt.Printf("  %s Failed to open tunnel: %s\n", dotFail, err)
+			return nil
+		}
+		lh, lp, _ := net.SplitHostPort(localAddr)
+		dialHost, dialPort = lh, lp
+		tunnelLabel = fmt.Sprintf(" (tunneled via %s)", bastion.Config().Host)
+		fmt.Printf("  %s Tunnel ready: %s -> %s\n", dotOK, localAddr, remoteAddr)
+	}
+
+	// Password is never persisted — always re-prompt.
+	password := promptPassword("Password")
+
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		url.QueryEscape(sc.Username),
+		url.QueryEscape(password),
+		dialHost, dialPort,
+		url.PathEscape(sc.Database),
+		url.QueryEscape(sc.SSLMode),
+	)
+
+	fmt.Printf("\n  Connecting to %s@%s:%s/%s%s ...\n", sc.Username, sc.Host, sc.Port, sc.Database, tunnelLabel)
+	factory, err := postgres.NewFactory(dsn)
+	if err == nil {
+		if _, perr := factory.Get(context.Background(), ""); perr == nil {
+			fmt.Printf("  %s PostgreSQL connected%s\n\n", dotOK, tunnelLabel)
+			return factory
+		} else {
+			err = perr
+		}
+	}
+	fmt.Printf("  %s Connection failed: %s\n", dotFail, err)
+	return nil
+}
+
+// promptSaveRDSConnection asks the user whether to persist a successful RDS
+// connection (everything except the password) to ~/.ape/config.yaml.
+func promptSaveRDSConnection(host, port, user, database, sslmode string, tunnel bool) {
+	savedCfg, err := config.Load()
+	if err != nil {
+		return
+	}
+
+	// Skip if already saved with same host/port/user/db.
+	for _, c := range savedCfg.RDSConnections {
+		if c.Host == host && c.Port == port && c.Username == user && c.Database == database {
+			return
+		}
+	}
+
+	save := promptWithDefault("Save this RDS connection? (y/n)", "y")
+	if !strings.EqualFold(save, "y") {
+		return
+	}
+
+	name := promptRequired("Connection name")
+	if name == "" {
+		name = fmt.Sprintf("%s@%s/%s", user, host, database)
+	}
+
+	savedCfg.AddRDSConnection(config.SavedRDSConnection{
+		Name:     name,
+		Host:     host,
+		Port:     port,
+		Username: user,
+		Database: database,
+		SSLMode:  sslmode,
+		Tunnel:   tunnel,
+	})
+
+	if err := config.Save(savedCfg); err != nil {
+		fmt.Printf("  %s Failed to save RDS connection: %s\n", dotWarn, err)
+		return
+	}
+	fmt.Printf("  %s RDS connection saved as \"%s\" (password not stored)\n", dotOK, name)
 }
 
 func promptPassword(label string) string {

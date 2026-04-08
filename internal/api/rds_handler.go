@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dongchankim/ape/internal/postgres"
@@ -50,6 +53,25 @@ type RDSTablesResponse struct {
 	Database string            `json:"database"`
 	Schema   string            `json:"schema"`
 	Tables   []RDSTableSummary `json:"tables"`
+}
+
+type RDSColumnInfo struct {
+	Name         string  `json:"name"`
+	DataType     string  `json:"data_type"`
+	IsNullable   bool    `json:"is_nullable"`
+	DefaultValue *string `json:"default_value"`
+	IsPrimaryKey bool    `json:"is_primary_key"`
+	Position     int     `json:"position"`
+}
+
+type RDSTableDetail struct {
+	Database    string          `json:"database"`
+	Schema      string          `json:"schema"`
+	Table       string          `json:"table"`
+	Columns     []RDSColumnInfo `json:"columns"`
+	SampleRows  [][]any         `json:"sample_rows"`
+	SampleLimit int             `json:"sample_limit"`
+	RowEstimate int64           `json:"row_estimate"`
 }
 
 // HandleOverview handles GET /api/rds/overview[?db=<dbname>].
@@ -181,6 +203,178 @@ func rdsOverviewError(msg string) RDSOverview {
 		Schemas:      []RDSSchemaSummary{},
 		Databases:    []RDSDatabaseSummary{},
 	}
+}
+
+// quoteIdent safely quotes a PostgreSQL identifier (schema, table, or column
+// name) for inclusion in dynamic SQL. PostgreSQL placeholder parameters
+// cannot be used for identifiers, so we wrap the value in double quotes and
+// escape any embedded double quotes.
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// HandleTableDetail handles GET /api/rds/table?db=&schema=&table=&sample_limit=N.
+//
+// Returns the column metadata (name, type, nullable, default, primary key)
+// and a small sample of rows for the given table. The sample query uses
+// quoted identifiers (placeholder parameters cannot be used for identifiers
+// in PostgreSQL), and the limit is capped server-side at 100 rows.
+func (h *RDSHandler) HandleTableDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if h.factory == nil {
+		writeError(w, http.StatusServiceUnavailable, "PostgreSQL is not configured")
+		return
+	}
+
+	q := r.URL.Query()
+	schema := q.Get("schema")
+	table := q.Get("table")
+	if schema == "" || table == "" {
+		writeError(w, http.StatusBadRequest, "schema and table parameters are required")
+		return
+	}
+	sampleLimit := 10
+	if v := q.Get("sample_limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sampleLimit = n
+		}
+	}
+	if sampleLimit > 100 {
+		sampleLimit = 100
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	requestedDB := q.Get("db")
+	client, err := h.factory.Get(ctx, requestedDB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to connect to database: "+err.Error())
+		return
+	}
+
+	out := RDSTableDetail{
+		Schema:      schema,
+		Table:       table,
+		Columns:     []RDSColumnInfo{},
+		SampleRows:  [][]any{},
+		SampleLimit: sampleLimit,
+	}
+	_ = client.QueryRowContext(ctx, "SELECT current_database()").Scan(&out.Database)
+
+	// Verify the table exists in this DB and grab its row estimate. This also
+	// guards against quoting attempts on non-existent identifiers.
+	qualified := schema + "." + table
+	if err := client.QueryRowContext(ctx, `
+		SELECT COALESCE(c.reltuples::bigint, 0)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2
+		  AND c.relkind IN ('r', 'p', 'v', 'm')
+	`, schema, table).Scan(&out.RowEstimate); err != nil {
+		writeError(w, http.StatusNotFound, "table not found: "+qualified)
+		return
+	}
+
+	// Primary key columns (set lookup).
+	pkCols := map[string]bool{}
+	pkRows, err := client.QueryContext(ctx, `
+		SELECT a.attname
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+		WHERE n.nspname = $1 AND c.relname = $2 AND i.indisprimary
+	`, schema, table)
+	if err == nil {
+		for pkRows.Next() {
+			var name string
+			if err := pkRows.Scan(&name); err == nil {
+				pkCols[name] = true
+			}
+		}
+		pkRows.Close()
+	}
+
+	// Column metadata.
+	colRows, err := client.QueryContext(ctx, `
+		SELECT column_name,
+		       data_type,
+		       is_nullable,
+		       column_default,
+		       ordinal_position
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2
+		ORDER BY ordinal_position
+	`, schema, table)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query columns: "+err.Error())
+		return
+	}
+	defer colRows.Close()
+	for colRows.Next() {
+		var (
+			c          RDSColumnInfo
+			isNullable string
+			defVal     *string
+		)
+		if err := colRows.Scan(&c.Name, &c.DataType, &isNullable, &defVal, &c.Position); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to parse column row: "+err.Error())
+			return
+		}
+		c.IsNullable = strings.EqualFold(isNullable, "YES")
+		c.DefaultValue = defVal
+		c.IsPrimaryKey = pkCols[c.Name]
+		out.Columns = append(out.Columns, c)
+	}
+	if err := colRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read column rows: "+err.Error())
+		return
+	}
+
+	// Sample rows. Identifiers must be quoted (placeholders are for values).
+	sampleSQL := fmt.Sprintf("SELECT * FROM %s.%s LIMIT $1", quoteIdent(schema), quoteIdent(table))
+	sRows, err := client.QueryContext(ctx, sampleSQL, sampleLimit)
+	if err != nil {
+		// Don't fail the whole request if sample fails (e.g. permission denied);
+		// return columns and an empty sample with a hint in the column list.
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	defer sRows.Close()
+
+	colNames, err := sRows.Columns()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read sample columns: "+err.Error())
+		return
+	}
+	for sRows.Next() {
+		vals := make([]any, len(colNames))
+		ptrs := make([]any, len(colNames))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := sRows.Scan(ptrs...); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan sample row: "+err.Error())
+			return
+		}
+		// Convert []byte to string so JSON encoding doesn't base64 it.
+		for i, v := range vals {
+			if b, ok := v.([]byte); ok {
+				vals[i] = string(b)
+			}
+		}
+		out.SampleRows = append(out.SampleRows, vals)
+	}
+	if err := sRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read sample rows: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, out)
 }
 
 // HandleTables handles GET /api/rds/tables?db=<name>&schema=<name>.

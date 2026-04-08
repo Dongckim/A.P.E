@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { AlertCircle, ArrowLeft, Database, Loader2, RefreshCw, Table } from "lucide-react";
-import type { RDSOverview, RDSTablesResponse } from "../types";
-import { fetchRDSOverview, fetchRDSTables } from "../api/client";
+import { AlertCircle, ArrowLeft, Database, KeyRound, Loader2, RefreshCw, Table } from "lucide-react";
+import type { RDSOverview, RDSTablesResponse, RDSTableDetail } from "../types";
+import { fetchRDSOverview, fetchRDSTables, fetchRDSTableDetail } from "../api/client";
 
 export function RDSOverviewPanel() {
   const [data, setData] = useState<RDSOverview | null>(null);
@@ -9,12 +9,17 @@ export function RDSOverviewPanel() {
   const [error, setError] = useState<string | null>(null);
   // selectedDb is the database name the user clicked. Empty string = factory default.
   const [selectedDb, setSelectedDb] = useState<string>("");
-  // selectedSchema drives the drill-down view. null = overview; non-null = tables list.
+  // selectedSchema drives the schema-level drill-down view. null = overview; non-null = tables list.
   const [selectedSchema, setSelectedSchema] = useState<string | null>(null);
-  // tables data for drill-down view
+  // tables data for schema drill-down view
   const [tables, setTables] = useState<RDSTablesResponse | null>(null);
   const [tablesLoading, setTablesLoading] = useState(false);
   const [tablesError, setTablesError] = useState<string | null>(null);
+  // selectedTable drives the table-level drill-down view (columns + sample rows).
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [tableDetail, setTableDetail] = useState<RDSTableDetail | null>(null);
+  const [tableDetailLoading, setTableDetailLoading] = useState(false);
+  const [tableDetailError, setTableDetailError] = useState<string | null>(null);
 
   const load = useCallback(async (db: string) => {
     setLoading(true);
@@ -42,6 +47,19 @@ export function RDSOverviewPanel() {
     }
   }, []);
 
+  const loadTableDetail = useCallback(async (schema: string, table: string, db: string) => {
+    setTableDetailLoading(true);
+    setTableDetailError(null);
+    try {
+      const out = await fetchRDSTableDetail(schema, table, db || undefined);
+      setTableDetail(out);
+    } catch (e) {
+      setTableDetailError(e instanceof Error ? e.message : "Failed to load table detail");
+    } finally {
+      setTableDetailLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load(selectedDb);
   }, [load, selectedDb]);
@@ -55,14 +73,29 @@ export function RDSOverviewPanel() {
     }
   }, [selectedSchema, selectedDb, loadTables]);
 
-  // Reset drill-down when DB changes.
+  useEffect(() => {
+    if (selectedSchema && selectedTable) {
+      loadTableDetail(selectedSchema, selectedTable, selectedDb);
+    } else {
+      setTableDetail(null);
+      setTableDetailError(null);
+    }
+  }, [selectedSchema, selectedTable, selectedDb, loadTableDetail]);
+
+  // Reset deeper drill-downs when ancestor changes.
   useEffect(() => {
     setSelectedSchema(null);
+    setSelectedTable(null);
   }, [selectedDb]);
+  useEffect(() => {
+    setSelectedTable(null);
+  }, [selectedSchema]);
 
-  const refreshing = loading || tablesLoading;
+  const refreshing = loading || tablesLoading || tableDetailLoading;
   const handleRefresh = () => {
-    if (selectedSchema) {
+    if (selectedTable && selectedSchema) {
+      loadTableDetail(selectedSchema, selectedTable, selectedDb);
+    } else if (selectedSchema) {
       loadTables(selectedSchema, selectedDb);
     } else {
       load(selectedDb);
@@ -87,7 +120,17 @@ export function RDSOverviewPanel() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {selectedSchema ? (
+        {selectedSchema && selectedTable ? (
+          <TableDetailDrilldown
+            schema={selectedSchema}
+            table={selectedTable}
+            db={data?.current_db || selectedDb || ""}
+            loading={tableDetailLoading}
+            error={tableDetailError}
+            data={tableDetail}
+            onBack={() => setSelectedTable(null)}
+          />
+        ) : selectedSchema ? (
           <TablesDrilldown
             schema={selectedSchema}
             db={data?.current_db || selectedDb || ""}
@@ -95,6 +138,7 @@ export function RDSOverviewPanel() {
             error={tablesError}
             data={tables}
             onBack={() => setSelectedSchema(null)}
+            onSelectTable={(name) => setSelectedTable(name)}
           />
         ) : (
           <>
@@ -244,6 +288,7 @@ function TablesDrilldown({
   error,
   data,
   onBack,
+  onSelectTable,
 }: {
   schema: string;
   db: string;
@@ -251,6 +296,7 @@ function TablesDrilldown({
   error: string | null;
   data: RDSTablesResponse | null;
   onBack: () => void;
+  onSelectTable: (name: string) => void;
 }) {
   return (
     <>
@@ -303,7 +349,12 @@ function TablesDrilldown({
               </thead>
               <tbody>
                 {data.tables.map((t) => (
-                  <tr key={t.name} className="border-t border-slate-800">
+                  <tr
+                    key={t.name}
+                    onClick={() => onSelectTable(t.name)}
+                    className="border-t border-slate-800 cursor-pointer hover:bg-slate-800/50 transition-colors"
+                    title={`Inspect ${t.name}`}
+                  >
                     <td className="px-3 py-2 text-slate-200">{t.name}</td>
                     <td className="px-3 py-2 text-right text-slate-300 tabular-nums">
                       {t.row_estimate < 0 ? "—" : t.row_estimate.toLocaleString()}
@@ -321,6 +372,167 @@ function TablesDrilldown({
       )}
     </>
   );
+}
+
+function TableDetailDrilldown({
+  schema,
+  table,
+  db,
+  loading,
+  error,
+  data,
+  onBack,
+}: {
+  schema: string;
+  table: string;
+  db: string;
+  loading: boolean;
+  error: string | null;
+  data: RDSTableDetail | null;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 text-sm text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-slate-800/60"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
+        <div className="text-sm text-slate-400">
+          <span className="text-slate-500">{db || "current"}</span>
+          <span className="mx-1 text-slate-600">/</span>
+          <span className="text-slate-400">{schema}</span>
+          <span className="mx-1 text-slate-600">/</span>
+          <span className="text-slate-200 font-medium">{table}</span>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center h-64 text-slate-400">
+          <Loader2 size={24} className="animate-spin" />
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="flex items-center gap-2 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {!loading && !error && data && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <StatCard label="Columns" value={String(data.columns.length)} />
+            <StatCard
+              label="Rows (est.)"
+              value={data.row_estimate < 0 ? "—" : data.row_estimate.toLocaleString()}
+            />
+            <StatCard
+              label="Primary Keys"
+              value={String(data.columns.filter((c) => c.is_primary_key).length)}
+            />
+          </div>
+
+          <div className="rounded border border-slate-700 bg-slate-900/40 overflow-hidden">
+            <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700">
+              Columns
+            </div>
+            {data.columns.length === 0 ? (
+              <div className="px-3 py-6 text-sm text-slate-500 text-center">No columns.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-slate-400 bg-slate-800/30">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">#</th>
+                    <th className="text-left px-3 py-2 font-medium">Name</th>
+                    <th className="text-left px-3 py-2 font-medium">Type</th>
+                    <th className="text-left px-3 py-2 font-medium">Nullable</th>
+                    <th className="text-left px-3 py-2 font-medium">Default</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.columns.map((c) => (
+                    <tr key={c.name} className="border-t border-slate-800">
+                      <td className="px-3 py-2 text-slate-500 tabular-nums">{c.position}</td>
+                      <td className="px-3 py-2 text-slate-200">
+                        <span className="inline-flex items-center gap-1.5">
+                          {c.is_primary_key && (
+                            <KeyRound size={12} className="text-amber-400" aria-label="primary key" />
+                          )}
+                          {c.name}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-cyan-300 font-mono text-xs">{c.data_type}</td>
+                      <td className="px-3 py-2 text-slate-400">{c.is_nullable ? "YES" : "NO"}</td>
+                      <td className="px-3 py-2 text-slate-500 font-mono text-xs truncate max-w-xs">
+                        {c.default_value ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="rounded border border-slate-700 bg-slate-900/40 overflow-hidden">
+            <div className="px-3 py-2 text-xs uppercase tracking-wide text-slate-400 border-b border-slate-700 flex items-center gap-2">
+              <Table size={12} />
+              Sample Rows (LIMIT {data.sample_limit})
+            </div>
+            {data.sample_rows.length === 0 ? (
+              <div className="px-3 py-6 text-sm text-slate-500 text-center">
+                No sample rows returned. Table may be empty or read access denied.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-slate-400 bg-slate-800/30">
+                    <tr>
+                      {data.columns.map((c) => (
+                        <th key={c.name} className="text-left px-3 py-2 font-medium whitespace-nowrap">
+                          {c.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.sample_rows.map((row, i) => (
+                      <tr key={i} className="border-t border-slate-800">
+                        {row.map((cell, j) => (
+                          <td
+                            key={j}
+                            className="px-3 py-2 text-slate-200 font-mono text-xs whitespace-nowrap max-w-xs truncate"
+                            title={formatCell(cell)}
+                          >
+                            {formatCell(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function formatCell(v: unknown): string {
+  if (v === null || v === undefined) return "NULL";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean" || typeof v === "bigint") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {

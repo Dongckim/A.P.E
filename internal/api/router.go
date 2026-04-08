@@ -47,8 +47,9 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgFactory *post
 
 	// RDS PostgreSQL operations
 	rds := NewRDSHandler(pgFactory)
-	mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET ?db=<name>
-	mux.HandleFunc("/api/rds/tables", rds.HandleTables)     // GET ?db=<name>&schema=<name>
+	mux.HandleFunc("/api/rds/overview", rds.HandleOverview)  // GET ?db=<name>
+	mux.HandleFunc("/api/rds/tables", rds.HandleTables)      // GET ?db=<name>&schema=<name>
+	mux.HandleFunc("/api/rds/table", rds.HandleTableDetail)  // GET ?db=<name>&schema=<name>&table=<name>&sample_limit=N
 
 	return mux
 }

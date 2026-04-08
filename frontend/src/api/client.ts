@@ -1,4 +1,4 @@
-import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo, RDSOverview, RDSTablesResponse } from "../types";
+import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo, RDSOverview, RDSTablesResponse, RDSTableDetail } from "../types";
 
 const BASE = "/api";
 
@@ -166,4 +166,15 @@ export async function fetchRDSTables(schema: string, db?: string): Promise<RDSTa
   const params = new URLSearchParams({ schema });
   if (db) params.set("db", db);
   return request<RDSTablesResponse>(`/rds/tables?${params.toString()}`);
+}
+
+export async function fetchRDSTableDetail(
+  schema: string,
+  table: string,
+  db?: string,
+  sampleLimit = 10,
+): Promise<RDSTableDetail> {
+  const params = new URLSearchParams({ schema, table, sample_limit: String(sampleLimit) });
+  if (db) params.set("db", db);
+  return request<RDSTableDetail>(`/rds/table?${params.toString()}`);
 }
