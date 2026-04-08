@@ -131,6 +131,49 @@ func (c *Client) Exec(ctx context.Context, cmd string) (string, int, error) {
 	}
 }
 
+// StartLocalForward opens a TCP listener on 127.0.0.1:0 (random free port)
+// and forwards every accepted connection through the existing SSH session to
+// remoteAddr (e.g. "rds.xxx.amazonaws.com:5432"). It is the in-process
+// equivalent of `ssh -L <localPort>:<remoteAddr> user@host`.
+//
+// Returns the chosen local address ("127.0.0.1:<port>") on success. The
+// listener and forwarding goroutine live until the SSH client is closed
+// (i.e. for the lifetime of the ape process).
+func (c *Client) StartLocalForward(remoteAddr string) (string, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("failed to open local listener: %w", err)
+	}
+
+	go func() {
+		for {
+			local, err := listener.Accept()
+			if err != nil {
+				slog.Debug("local forward listener stopped", "err", err)
+				return
+			}
+			go c.handleForward(local, remoteAddr)
+		}
+	}()
+
+	return listener.Addr().String(), nil
+}
+
+func (c *Client) handleForward(local net.Conn, remoteAddr string) {
+	defer local.Close()
+	remote, err := c.sshClient.Dial("tcp", remoteAddr)
+	if err != nil {
+		slog.Warn("ssh tunnel dial failed", "addr", remoteAddr, "err", err)
+		return
+	}
+	defer remote.Close()
+
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(remote, local); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(local, remote); done <- struct{}{} }()
+	<-done
+}
+
 // Close shuts down the SFTP session and SSH connection.
 func (c *Client) Close() error {
 	if c.sftpClient != nil {

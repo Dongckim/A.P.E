@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/dongchankim/ape/internal/s3"
 	"github.com/dongchankim/ape/internal/server"
 	"github.com/dongchankim/ape/internal/sftp"
+	"golang.org/x/term"
 )
 
 // ANSI color (only used for the ⏺ dot)
@@ -87,23 +89,20 @@ func Execute() {
 		fmt.Printf("  %s S3 client initialized\n\n", dotOK)
 	}
 
-	// Initialize PostgreSQL client (optional; enabled via env var)
-	var pgClient postgres.Client
-	pgc, err := postgres.NewFromEnv(context.Background())
-	if err != nil {
-		fmt.Printf("  %s PostgreSQL not available: %s\n\n", dotWarn, err.Error())
-	} else {
-		pgClient = pgc
-		fmt.Printf("  %s PostgreSQL client initialized\n\n", dotOK)
-	}
+	// EC2 connection first — its SSH client may be used to tunnel RDS.
+	cfg := promptOrSelectConnection()
+	bastion := connectAndRegister(cfg, connMgr)
 
-	srv := server.New("127.0.0.1:9000", connMgr, s3Client, pgClient)
+	// Initialize PostgreSQL factory (optional; interactive prompt or APE_PG_DSN).
+	// If an EC2 connection is up, ape can open an in-process SSH tunnel so
+	// the user does not have to run `ssh -L` manually. The factory lets the
+	// UI switch databases on the same server without re-prompting.
+	pgFactory := promptRDSConnection(bastion)
+
+	srv := server.New("127.0.0.1:9000", connMgr, s3Client, pgFactory)
 	if srv.FrontendStaleHint != "" {
 		fmt.Printf("  %s %s\n\n", dotWarn, srv.FrontendStaleHint)
 	}
-
-	cfg := promptOrSelectConnection()
-	connectAndRegister(cfg, connMgr)
 
 	go func() {
 		if err := srv.Start(); err != nil && err.Error() != "http: Server closed" {
@@ -119,7 +118,7 @@ func Execute() {
 	repl(srv, connMgr)
 }
 
-func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) {
+func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) *sftp.Client {
 	fmt.Printf("  Connecting to %s@%s:%s ...\n", cfg.Username, cfg.Host, cfg.Port)
 
 	client, err := sftp.Connect(cfg)
@@ -157,6 +156,7 @@ func connectAndRegister(cfg sftp.ConnectConfig, connMgr *api.ConnectionManager) 
 	slog.Debug("connection registered", "id", id)
 
 	promptSaveConnection(cfg)
+	return client
 }
 
 func promptSaveConnection(cfg sftp.ConnectConfig) {
@@ -276,6 +276,136 @@ func promptConnection() sftp.ConnectConfig {
 
 func promptConnectionFull() sftp.ConnectConfig {
 	return promptConnection()
+}
+
+// promptRDSConnection asks the user whether to connect to an RDS PostgreSQL
+// instance and gathers credentials interactively. Returns nil if the user
+// declines or retries are exhausted. If APE_PG_DSN is set, it is used directly.
+//
+// If bastion is non-nil and the user opts in, ape opens an in-process SSH
+// tunnel through the EC2 connection (no separate `ssh -L` terminal needed):
+// it binds a random local port on 127.0.0.1, forwards each accepted
+// connection through SSH to the RDS endpoint.
+//
+// The returned *postgres.Factory caches per-database clients, so the UI can
+// switch databases on the same server without re-prompting for credentials.
+func promptRDSConnection(bastion *sftp.Client) *postgres.Factory {
+	if dsn := os.Getenv("APE_PG_DSN"); dsn != "" {
+		factory, err := postgres.NewFactory(dsn)
+		if err != nil {
+			fmt.Printf("  %s PostgreSQL (APE_PG_DSN) failed: %s\n\n", dotWarn, err)
+			return nil
+		}
+		if _, err := factory.Get(context.Background(), ""); err != nil {
+			fmt.Printf("  %s PostgreSQL (APE_PG_DSN) failed: %s\n\n", dotWarn, err)
+			return nil
+		}
+		fmt.Printf("  %s PostgreSQL connected (from APE_PG_DSN)\n\n", dotOK)
+		return factory
+	}
+
+	answer := promptWithDefault("Connect to RDS PostgreSQL? (y/N)", "N")
+	if !strings.EqualFold(answer, "y") {
+		fmt.Printf("  %s RDS skipped\n\n", dotWarn)
+		return nil
+	}
+
+	// Decide whether to tunnel through the EC2 SSH connection.
+	useTunnel := false
+	if bastion != nil {
+		fmt.Printf("\n  %s EC2 SSH connection active (%s).\n", dotOK, bastion.Config().Host)
+		fmt.Println("    For RDS in a private subnet, ape can tunnel through this EC2.")
+		ans := promptWithDefault("Tunnel RDS through this EC2? (Y/n)", "Y")
+		useTunnel = strings.EqualFold(ans, "y") || ans == ""
+	}
+
+	for {
+		rdsHost := promptRequired("RDS endpoint host")
+		if rdsHost == "" {
+			fmt.Printf("  %s Host required, skipping RDS\n\n", dotWarn)
+			return nil
+		}
+		rdsPort := promptWithDefault("RDS port", "5432")
+		if !isValidPort(rdsPort) {
+			fmt.Printf("  %s Invalid port '%s', using 5432\n", dotWarn, rdsPort)
+			rdsPort = "5432"
+		}
+		username := promptWithDefault("Username", "postgres")
+		database := promptWithDefault("Database", "postgres")
+		password := promptPassword("Password")
+
+		// If tunneling, open the local forwarder and rewrite the connect target
+		// to 127.0.0.1:<localPort>. SSL still happens end-to-end with the real
+		// RDS server (the tunnel only relays TCP bytes), so sslmode=require
+		// works — and is in fact required because RDS rejects unencrypted
+		// connections via pg_hba.conf. We use `require` (not verify-full)
+		// because pgx would otherwise try to verify the cert against
+		// "127.0.0.1" instead of the RDS hostname.
+		dialHost, dialPort := rdsHost, rdsPort
+		sslmode := "require"
+		tunnelLabel := ""
+		if useTunnel {
+			remoteAddr := net.JoinHostPort(rdsHost, rdsPort)
+			fmt.Printf("\n  Opening SSH tunnel to %s ...\n", remoteAddr)
+			localAddr, err := bastion.StartLocalForward(remoteAddr)
+			if err != nil {
+				fmt.Printf("  %s Failed to open tunnel: %s\n", dotFail, err)
+				retry := promptWithDefault("Retry? (y/N)", "N")
+				if !strings.EqualFold(retry, "y") {
+					return nil
+				}
+				continue
+			}
+			lh, lp, _ := net.SplitHostPort(localAddr)
+			dialHost, dialPort = lh, lp
+			tunnelLabel = fmt.Sprintf(" (tunneled via %s)", bastion.Config().Host)
+			fmt.Printf("  %s Tunnel ready: %s -> %s\n", dotOK, localAddr, remoteAddr)
+		} else {
+			// Direct connection — let user override sslmode
+			sslmode = promptWithDefault("SSL mode", "require")
+		}
+
+		dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+			url.QueryEscape(username),
+			url.QueryEscape(password),
+			dialHost, dialPort,
+			url.PathEscape(database),
+			url.QueryEscape(sslmode),
+		)
+
+		fmt.Printf("\n  Connecting to %s@%s:%s/%s%s ...\n", username, rdsHost, rdsPort, database, tunnelLabel)
+		factory, err := postgres.NewFactory(dsn)
+		if err == nil {
+			if _, perr := factory.Get(context.Background(), ""); perr == nil {
+				fmt.Printf("  %s PostgreSQL connected%s\n\n", dotOK, tunnelLabel)
+				return factory
+			} else {
+				err = perr
+			}
+		}
+		fmt.Printf("  %s Connection failed: %s\n", dotFail, err)
+
+		retry := promptWithDefault("Retry? (y/N)", "N")
+		if !strings.EqualFold(retry, "y") {
+			fmt.Printf("  %s RDS skipped\n\n", dotWarn)
+			return nil
+		}
+	}
+}
+
+func promptPassword(label string) string {
+	fmt.Printf("? %s: ", label)
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		input, _ := reader.ReadString('\n')
+		return cleanInput(input)
+	}
+	bytePwd, err := term.ReadPassword(fd)
+	fmt.Println()
+	if err != nil {
+		return ""
+	}
+	return string(bytePwd)
 }
 
 func repl(srv *server.Server, connMgr *api.ConnectionManager) {

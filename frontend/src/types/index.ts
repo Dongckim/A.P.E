@@ -116,6 +116,26 @@ export interface RDSSchemaSummary {
   table_count: number;
 }
 
+export interface RDSDatabaseSummary {
+  name: string;
+  size_bytes: number;
+  size_pretty: string;
+  is_current: boolean;
+}
+
+export interface RDSTableSummary {
+  name: string;
+  row_estimate: number;
+  size_bytes: number;
+  size_pretty: string;
+}
+
+export interface RDSTablesResponse {
+  database: string;
+  schema: string;
+  tables: RDSTableSummary[];
+}
+
 export interface RDSOverview {
   version: string;
   current_db: string;
@@ -123,6 +143,8 @@ export interface RDSOverview {
   table_count: number;
   /** Always an array from current API; may be null from older responses. */
   schemas?: RDSSchemaSummary[] | null;
+  /** Always an array from current API; may be null from older responses. */
+  databases?: RDSDatabaseSummary[] | null;
   connected: boolean;
   error?: string;
 }

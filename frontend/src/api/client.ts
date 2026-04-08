@@ -1,4 +1,4 @@
-import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo, RDSOverview } from "../types";
+import type { ApiResponse, FileInfo, BucketInfo, S3ObjectList, ConnectionInfo, DashboardOverview, ServicesData, GitInfo, ProcessInfo, RDSOverview, RDSTablesResponse } from "../types";
 
 const BASE = "/api";
 
@@ -157,6 +157,13 @@ export async function fetchProcesses(): Promise<ProcessInfo[]> {
 
 // --- RDS / PostgreSQL ---
 
-export async function fetchRDSOverview(): Promise<RDSOverview> {
-  return request<RDSOverview>("/rds/overview");
+export async function fetchRDSOverview(db?: string): Promise<RDSOverview> {
+  const qs = db ? `?db=${encodeURIComponent(db)}` : "";
+  return request<RDSOverview>(`/rds/overview${qs}`);
+}
+
+export async function fetchRDSTables(schema: string, db?: string): Promise<RDSTablesResponse> {
+  const params = new URLSearchParams({ schema });
+  if (db) params.set("db", db);
+  return request<RDSTablesResponse>(`/rds/tables?${params.toString()}`);
 }

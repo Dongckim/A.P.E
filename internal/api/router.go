@@ -8,7 +8,7 @@ import (
 )
 
 // NewRouter creates the API route multiplexer.
-func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgClient postgres.Client) *http.ServeMux {
+func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgFactory *postgres.Factory) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	ec2 := NewEC2Handler(connMgr)
@@ -46,8 +46,9 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgClient postgr
 	}
 
 	// RDS PostgreSQL operations
-	rds := NewRDSHandler(pgClient)
-	mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET
+	rds := NewRDSHandler(pgFactory)
+	mux.HandleFunc("/api/rds/overview", rds.HandleOverview) // GET ?db=<name>
+	mux.HandleFunc("/api/rds/tables", rds.HandleTables)     // GET ?db=<name>&schema=<name>
 
 	return mux
 }

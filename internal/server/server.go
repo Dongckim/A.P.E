@@ -18,13 +18,13 @@ import (
 type Server struct {
 	httpServer *http.Server
 	ConnMgr    *api.ConnectionManager
-	PGClient   postgres.Client
+	PGFactory  *postgres.Factory
 	// FrontendStaleHint is set when the embedded dist predates new UI (non-empty).
 	FrontendStaleHint string
 }
 
-func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgClient postgres.Client) *Server {
-	apiMux := api.NewRouter(connMgr, s3Client, pgClient)
+func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgFactory *postgres.Factory) *Server {
+	apiMux := api.NewRouter(connMgr, s3Client, pgFactory)
 
 	// Load embedded frontend
 	var frontendHandler http.Handler
@@ -71,7 +71,7 @@ func New(addr string, connMgr *api.ConnectionManager, s3Client s3.S3Client, pgCl
 			Handler: handler,
 		},
 		ConnMgr:           connMgr,
-		PGClient:          pgClient,
+		PGFactory:         pgFactory,
 		FrontendStaleHint: frontendStaleHint,
 	}
 }
@@ -136,8 +136,8 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown() error {
 	s.ConnMgr.CloseAll()
-	if s.PGClient != nil {
-		_ = s.PGClient.Close()
+	if s.PGFactory != nil {
+		_ = s.PGFactory.Close()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
