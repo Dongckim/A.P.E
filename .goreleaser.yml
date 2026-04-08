@@ -20,6 +20,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
+      - -X github.com/dongchankim/ape/cmd.Version={{.Version}}
 
 archives:
   - format: tar.gz
@@ -43,12 +44,12 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     name: ape
     homepage: https://github.com/Dongckim/A.P.E
-    description: "AWS Platform Explorer — browse EC2 files and S3 buckets from your browser"
+    description: "AWS Platform Explorer — browse EC2/S3/RDS PostgreSQL from your browser"
     license: MIT
     install: |
       bin.install "ape"
     test: |
-      assert_match "A.P.E", shell_output("#{bin}/ape --version 2>&1", 1)
+      assert_match "A.P.E", shell_output("#{bin}/ape --version")
 
 release:
   github:

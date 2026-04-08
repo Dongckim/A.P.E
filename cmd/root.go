@@ -36,7 +36,11 @@ var (
 	dotWarn = cYellow + "⏺" + cReset
 )
 
-const banner = `
+// Version is injected at build time via -ldflags "-X github.com/dongchankim/ape/cmd.Version=vX.Y.Z".
+// Defaults to "dev" for `go run`/`go build` without ldflags.
+var Version = "dev"
+
+const bannerTmpl = `
           ▄▄██████████▄▄
         ▄████████████████▄
        ████████████████████
@@ -54,7 +58,7 @@ const banner = `
        ██  ██  ██      ██████
 
          AWS Platform Explorer
-               v0.1.0
+               %s
 
 `
 
@@ -72,10 +76,25 @@ A.P.E is running. Commands:
 var reader *bufio.Reader
 
 func Execute() {
+	// Handle --version / -v / version flags before any side effects.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Printf("A.P.E (AWS Platform Explorer) %s\n", Version)
+			return
+		case "--help", "-h", "help":
+			fmt.Printf(bannerTmpl, Version)
+			fmt.Println("Usage: ape           Start interactive A.P.E session")
+			fmt.Println("       ape --version Print version and exit")
+			fmt.Println("       ape --help    Print this message")
+			return
+		}
+	}
+
 	reader = bufio.NewReader(os.Stdin)
 
 	fmt.Print("\033[2J\033[H") // clear screen, cursor to top
-	fmt.Print(banner)
+	fmt.Printf(bannerTmpl, Version)
 
 	connMgr := api.NewConnectionManager()
 
