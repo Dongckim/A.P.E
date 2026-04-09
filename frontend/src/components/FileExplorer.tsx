@@ -167,7 +167,7 @@ export function FileExplorer() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selected, files, renamingPath, editingFile, handleNewFolder, handleOpen]);
+  }, [selected, files, renamingPath, editingFile, handleNewFolder, handleOpen, showShortcuts]);
 
   // Editor view
   if (editingFile) {

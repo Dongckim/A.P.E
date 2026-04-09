@@ -14,7 +14,7 @@ function safeType(s: string): string {
 }
 
 /** Build mermaid erDiagram source from the API response. */
-export function buildERDSource(data: RDSERDResponse): string {
+function buildERDSource(data: RDSERDResponse): string {
   const lines: string[] = ["erDiagram"];
 
   for (const t of data.tables) {
