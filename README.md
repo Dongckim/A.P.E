@@ -35,7 +35,7 @@ One binary. SSH into your EC2. Get a Finder-like GUI at `localhost:9000` for fil
 
 ## 🎥 Demo (v0.5.0 — RDS PostgreSQL)
 
-https://github.com/Dongckim/A.P.E/releases/download/v0.5.0/ape-v0.5.0-rds-demo.mp4
+![A.P.E v0.5.0 — RDS PostgreSQL demo](docs/ape-rds-demo.gif)
 
 > *Click through every database, drill into any schema, and auto-generate the entire ERD with one click.*
 
