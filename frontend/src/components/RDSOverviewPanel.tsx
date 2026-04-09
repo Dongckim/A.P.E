@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { AlertCircle, ArrowLeft, Database, KeyRound, Loader2, RefreshCw, Table } from "lucide-react";
-import type { RDSOverview, RDSTablesResponse, RDSTableDetail } from "../types";
-import { fetchRDSOverview, fetchRDSTables, fetchRDSTableDetail } from "../api/client";
+import { AlertCircle, ArrowLeft, Database, GitBranch, KeyRound, Loader2, RefreshCw, Table } from "lucide-react";
+import type { RDSOverview, RDSTablesResponse, RDSTableDetail, RDSERDResponse } from "../types";
+import { fetchRDSOverview, fetchRDSTables, fetchRDSTableDetail, fetchRDSERD } from "../api/client";
+import { RDSERDView } from "./RDSERDView";
 
 export function RDSOverviewPanel() {
   const [data, setData] = useState<RDSOverview | null>(null);
@@ -20,6 +21,11 @@ export function RDSOverviewPanel() {
   const [tableDetail, setTableDetail] = useState<RDSTableDetail | null>(null);
   const [tableDetailLoading, setTableDetailLoading] = useState(false);
   const [tableDetailError, setTableDetailError] = useState<string | null>(null);
+  // erdSchema is set when the user opens the ERD view for a schema.
+  const [erdSchema, setErdSchema] = useState<string | null>(null);
+  const [erdData, setErdData] = useState<RDSERDResponse | null>(null);
+  const [erdLoading, setErdLoading] = useState(false);
+  const [erdError, setErdError] = useState<string | null>(null);
 
   const load = useCallback(async (db: string) => {
     setLoading(true);
@@ -60,6 +66,19 @@ export function RDSOverviewPanel() {
     }
   }, []);
 
+  const loadERD = useCallback(async (schema: string, db: string) => {
+    setErdLoading(true);
+    setErdError(null);
+    try {
+      const out = await fetchRDSERD(schema, db || undefined);
+      setErdData(out);
+    } catch (e) {
+      setErdError(e instanceof Error ? e.message : "Failed to load ERD");
+    } finally {
+      setErdLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load(selectedDb);
   }, [load, selectedDb]);
@@ -82,18 +101,30 @@ export function RDSOverviewPanel() {
     }
   }, [selectedSchema, selectedTable, selectedDb, loadTableDetail]);
 
+  useEffect(() => {
+    if (erdSchema) {
+      loadERD(erdSchema, selectedDb);
+    } else {
+      setErdData(null);
+      setErdError(null);
+    }
+  }, [erdSchema, selectedDb, loadERD]);
+
   // Reset deeper drill-downs when ancestor changes.
   useEffect(() => {
     setSelectedSchema(null);
     setSelectedTable(null);
+    setErdSchema(null);
   }, [selectedDb]);
   useEffect(() => {
     setSelectedTable(null);
   }, [selectedSchema]);
 
-  const refreshing = loading || tablesLoading || tableDetailLoading;
+  const refreshing = loading || tablesLoading || tableDetailLoading || erdLoading;
   const handleRefresh = () => {
-    if (selectedTable && selectedSchema) {
+    if (erdSchema) {
+      loadERD(erdSchema, selectedDb);
+    } else if (selectedTable && selectedSchema) {
       loadTableDetail(selectedSchema, selectedTable, selectedDb);
     } else if (selectedSchema) {
       loadTables(selectedSchema, selectedDb);
@@ -120,7 +151,16 @@ export function RDSOverviewPanel() {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {selectedSchema && selectedTable ? (
+        {erdSchema ? (
+          <ERDDrilldown
+            schema={erdSchema}
+            db={data?.current_db || selectedDb || ""}
+            loading={erdLoading}
+            error={erdError}
+            data={erdData}
+            onBack={() => setErdSchema(null)}
+          />
+        ) : selectedSchema && selectedTable ? (
           <TableDetailDrilldown
             schema={selectedSchema}
             table={selectedTable}
@@ -139,6 +179,7 @@ export function RDSOverviewPanel() {
             data={tables}
             onBack={() => setSelectedSchema(null)}
             onSelectTable={(name) => setSelectedTable(name)}
+            onViewERD={() => setErdSchema(selectedSchema)}
           />
         ) : (
           <>
@@ -289,6 +330,7 @@ function TablesDrilldown({
   data,
   onBack,
   onSelectTable,
+  onViewERD,
 }: {
   schema: string;
   db: string;
@@ -297,6 +339,7 @@ function TablesDrilldown({
   data: RDSTablesResponse | null;
   onBack: () => void;
   onSelectTable: (name: string) => void;
+  onViewERD: () => void;
 }) {
   return (
     <>
@@ -313,6 +356,14 @@ function TablesDrilldown({
           <span className="mx-1 text-slate-600">/</span>
           <span className="text-slate-200 font-medium">{schema}</span>
         </div>
+        <button
+          onClick={onViewERD}
+          className="ml-auto flex items-center gap-1 text-sm text-cyan-300 hover:text-white px-2 py-1 rounded border border-cyan-500/30 hover:bg-cyan-500/10"
+          title="View entity-relationship diagram for this schema"
+        >
+          <GitBranch size={14} />
+          View ERD
+        </button>
       </div>
 
       {loading && (
@@ -533,6 +584,61 @@ function formatCell(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+function ERDDrilldown({
+  schema,
+  db,
+  loading,
+  error,
+  data,
+  onBack,
+}: {
+  schema: string;
+  db: string;
+  loading: boolean;
+  error: string | null;
+  data: RDSERDResponse | null;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 text-sm text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-slate-800/60"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
+        <div className="text-sm text-slate-400">
+          <span className="text-slate-500">{db || "current"}</span>
+          <span className="mx-1 text-slate-600">/</span>
+          <span className="text-slate-400">{schema}</span>
+          <span className="mx-1 text-slate-600">/</span>
+          <span className="text-slate-200 font-medium flex items-center gap-1">
+            <GitBranch size={12} />
+            ERD
+          </span>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center h-64 text-slate-400">
+          <Loader2 size={24} className="animate-spin" />
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="flex items-center gap-2 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {!loading && !error && data && <RDSERDView data={data} />}
+    </>
+  );
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {

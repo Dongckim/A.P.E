@@ -155,6 +155,36 @@ export interface RDSTableDetail {
   row_estimate: number;
 }
 
+export interface RDSERDColumn {
+  name: string;
+  data_type: string;
+  is_primary_key: boolean;
+  is_foreign_key: boolean;
+  is_nullable: boolean;
+}
+
+export interface RDSERDTable {
+  name: string;
+  columns: RDSERDColumn[];
+}
+
+export interface RDSERDEdge {
+  constraint_name: string;
+  from_table: string;
+  from_column: string;
+  to_table: string;
+  to_column: string;
+}
+
+export interface RDSERDResponse {
+  database: string;
+  schema: string;
+  tables: RDSERDTable[];
+  edges: RDSERDEdge[];
+  truncated: boolean;
+  table_limit: number;
+}
+
 export interface RDSOverview {
   version: string;
   current_db: string;

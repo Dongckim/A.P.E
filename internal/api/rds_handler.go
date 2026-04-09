@@ -74,6 +74,36 @@ type RDSTableDetail struct {
 	RowEstimate int64           `json:"row_estimate"`
 }
 
+type RDSERDColumn struct {
+	Name         string `json:"name"`
+	DataType     string `json:"data_type"`
+	IsPrimaryKey bool   `json:"is_primary_key"`
+	IsForeignKey bool   `json:"is_foreign_key"`
+	IsNullable   bool   `json:"is_nullable"`
+}
+
+type RDSERDTable struct {
+	Name    string         `json:"name"`
+	Columns []RDSERDColumn `json:"columns"`
+}
+
+type RDSERDEdge struct {
+	ConstraintName string `json:"constraint_name"`
+	FromTable      string `json:"from_table"`
+	FromColumn     string `json:"from_column"`
+	ToTable        string `json:"to_table"`
+	ToColumn       string `json:"to_column"`
+}
+
+type RDSERDResponse struct {
+	Database   string        `json:"database"`
+	Schema     string        `json:"schema"`
+	Tables     []RDSERDTable `json:"tables"`
+	Edges      []RDSERDEdge  `json:"edges"`
+	Truncated  bool          `json:"truncated"`
+	TableLimit int           `json:"table_limit"`
+}
+
 // HandleOverview handles GET /api/rds/overview[?db=<dbname>].
 //
 // The optional `db` query parameter switches the connection to a different
@@ -371,6 +401,206 @@ func (h *RDSHandler) HandleTableDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := sRows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read sample rows: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, out)
+}
+
+// HandleERD handles GET /api/rds/erd?db=<name>&schema=<name>&limit=<n>.
+//
+// Returns the data needed to render an Entity Relationship Diagram for a
+// schema: each table's columns (with PK/FK marks) and the foreign key edges
+// between them. The number of tables is capped server-side to keep the
+// rendered diagram readable.
+func (h *RDSHandler) HandleERD(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if h.factory == nil {
+		writeError(w, http.StatusServiceUnavailable, "PostgreSQL is not configured")
+		return
+	}
+
+	q := r.URL.Query()
+	schema := q.Get("schema")
+	if schema == "" {
+		writeError(w, http.StatusBadRequest, "schema parameter is required")
+		return
+	}
+	tableLimit := 50
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tableLimit = n
+		}
+	}
+	if tableLimit > 200 {
+		tableLimit = 200
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	requestedDB := q.Get("db")
+	client, err := h.factory.Get(ctx, requestedDB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to connect to database: "+err.Error())
+		return
+	}
+
+	out := RDSERDResponse{
+		Schema:     schema,
+		Tables:     []RDSERDTable{},
+		Edges:      []RDSERDEdge{},
+		TableLimit: tableLimit,
+	}
+	_ = client.QueryRowContext(ctx, "SELECT current_database()").Scan(&out.Database)
+
+	// Step 1: list tables in this schema (LIMIT applied) + a count to know if truncated.
+	var totalTables int
+	if err := client.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
+	`, schema).Scan(&totalTables); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count tables: "+err.Error())
+		return
+	}
+	out.Truncated = totalTables > tableLimit
+
+	tableRows, err := client.QueryContext(ctx, `
+		SELECT c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
+		ORDER BY c.relname
+		LIMIT $2
+	`, schema, tableLimit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list tables: "+err.Error())
+		return
+	}
+	tableSet := map[string]bool{}
+	tableOrder := []string{}
+	for tableRows.Next() {
+		var name string
+		if err := tableRows.Scan(&name); err != nil {
+			tableRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to scan table name: "+err.Error())
+			return
+		}
+		tableSet[name] = true
+		tableOrder = append(tableOrder, name)
+	}
+	tableRows.Close()
+
+	// Step 2: pull all columns for the schema, with PK/FK marks via LEFT JOIN.
+	// Filter to the truncated set in Go.
+	colRows, err := client.QueryContext(ctx, `
+		SELECT c.table_name,
+		       c.column_name,
+		       c.data_type,
+		       c.is_nullable,
+		       COALESCE(pk.is_pk, false) AS is_pk,
+		       COALESCE(fk.is_fk, false) AS is_fk,
+		       c.ordinal_position
+		FROM information_schema.columns c
+		LEFT JOIN (
+		    SELECT kcu.table_name, kcu.column_name, true AS is_pk
+		    FROM information_schema.table_constraints tc
+		    JOIN information_schema.key_column_usage kcu
+		      ON tc.constraint_name = kcu.constraint_name
+		     AND tc.table_schema = kcu.table_schema
+		    WHERE tc.constraint_type = 'PRIMARY KEY'
+		      AND tc.table_schema = $1
+		) pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+		LEFT JOIN (
+		    SELECT kcu.table_name, kcu.column_name, true AS is_fk
+		    FROM information_schema.table_constraints tc
+		    JOIN information_schema.key_column_usage kcu
+		      ON tc.constraint_name = kcu.constraint_name
+		     AND tc.table_schema = kcu.table_schema
+		    WHERE tc.constraint_type = 'FOREIGN KEY'
+		      AND tc.table_schema = $1
+		) fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+		WHERE c.table_schema = $1
+		ORDER BY c.table_name, c.ordinal_position
+	`, schema)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query columns: "+err.Error())
+		return
+	}
+	defer colRows.Close()
+
+	tablesByName := map[string]*RDSERDTable{}
+	for _, name := range tableOrder {
+		tbl := &RDSERDTable{Name: name, Columns: []RDSERDColumn{}}
+		tablesByName[name] = tbl
+	}
+	for colRows.Next() {
+		var (
+			tableName  string
+			c          RDSERDColumn
+			isNullable string
+			ordinal    int
+		)
+		if err := colRows.Scan(&tableName, &c.Name, &c.DataType, &isNullable, &c.IsPrimaryKey, &c.IsForeignKey, &ordinal); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to parse column row: "+err.Error())
+			return
+		}
+		if !tableSet[tableName] {
+			continue
+		}
+		c.IsNullable = strings.EqualFold(isNullable, "YES")
+		tablesByName[tableName].Columns = append(tablesByName[tableName].Columns, c)
+	}
+	if err := colRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read column rows: "+err.Error())
+		return
+	}
+	for _, name := range tableOrder {
+		out.Tables = append(out.Tables, *tablesByName[name])
+	}
+
+	// Step 3: foreign-key edges. Filter to edges where both endpoints are in
+	// the truncated table set.
+	edgeRows, err := client.QueryContext(ctx, `
+		SELECT tc.constraint_name,
+		       tc.table_name      AS from_table,
+		       kcu.column_name    AS from_column,
+		       ccu.table_name     AS to_table,
+		       ccu.column_name    AS to_column
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON tc.constraint_name = kcu.constraint_name
+		 AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu
+		  ON ccu.constraint_name = tc.constraint_name
+		 AND ccu.table_schema = tc.table_schema
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+		  AND tc.table_schema = $1
+		ORDER BY tc.table_name, tc.constraint_name
+	`, schema)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to query foreign keys: "+err.Error())
+		return
+	}
+	defer edgeRows.Close()
+	for edgeRows.Next() {
+		var e RDSERDEdge
+		if err := edgeRows.Scan(&e.ConstraintName, &e.FromTable, &e.FromColumn, &e.ToTable, &e.ToColumn); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to parse edge row: "+err.Error())
+			return
+		}
+		if !tableSet[e.FromTable] || !tableSet[e.ToTable] {
+			continue
+		}
+		out.Edges = append(out.Edges, e)
+	}
+	if err := edgeRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read edge rows: "+err.Error())
 		return
 	}
 
