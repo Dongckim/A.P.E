@@ -4,10 +4,11 @@ import { Dashboard } from "./components/Dashboard";
 import { FileExplorer } from "./components/FileExplorer";
 import { S3Browser } from "./components/S3Browser";
 import { RDSOverviewPanel } from "./components/RDSOverviewPanel";
+import { Terminal } from "./components/Terminal";
 import { ConnectionModal } from "./components/ConnectionModal";
 
 function App() {
-  const [activeView, setActiveView] = useState<"dashboard" | "ec2" | "s3" | "rds">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "ec2" | "s3" | "rds" | "terminal">("dashboard");
   const [showConnections, setShowConnections] = useState(false);
 
   return (
@@ -22,6 +23,7 @@ function App() {
         {activeView === "ec2" && <FileExplorer />}
         {activeView === "s3" && <S3Browser />}
         {activeView === "rds" && <RDSOverviewPanel />}
+        {activeView === "terminal" && <Terminal />}
       </main>
 
       {showConnections && <ConnectionModal onClose={() => setShowConnections(false)} />}

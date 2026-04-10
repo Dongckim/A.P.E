@@ -27,6 +27,10 @@ func NewRouter(connMgr *ConnectionManager, s3Client s3.S3Client, pgFactory *post
 	mux.HandleFunc("/api/ec2/mkdir", ec2.HandleMkdir)           // POST ?path=
 	mux.HandleFunc("/api/ec2/stat", ec2.HandleStat)             // GET  ?path=
 
+	// Terminal (WebSocket → SSH PTY)
+	term := NewTerminalHandler(connMgr)
+	mux.HandleFunc("/api/ec2/terminal", term.HandleTerminal) // GET (WebSocket upgrade)
+
 	// Dashboard
 	dash := NewDashboardHandler(connMgr)
 	mux.HandleFunc("/api/dashboard/overview", dash.HandleOverview)

@@ -46,6 +46,23 @@ func (m *ConnectionManager) Get(id string) sftp.SFTPClient {
 	return c
 }
 
+// GetRaw returns the concrete *sftp.Client (needed for SSH session creation).
+func (m *ConnectionManager) GetRaw(id string) *sftp.Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.connections[id]
+}
+
+// DefaultRaw returns the first connection as a concrete *sftp.Client.
+func (m *ConnectionManager) DefaultRaw() *sftp.Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.order) == 0 {
+		return nil
+	}
+	return m.connections[m.order[0]]
+}
+
 // Default returns the first (most recently added) connection, or nil.
 func (m *ConnectionManager) Default() sftp.SFTPClient {
 	m.mu.RLock()

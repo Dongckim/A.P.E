@@ -1,6 +1,6 @@
-import { Monitor, HardDrive, Plus, Settings, LayoutDashboard, Database } from "lucide-react";
+import { Monitor, HardDrive, Plus, Settings, LayoutDashboard, Database, TerminalSquare } from "lucide-react";
 
-type View = "dashboard" | "ec2" | "s3" | "rds";
+type View = "dashboard" | "ec2" | "s3" | "rds" | "terminal";
 
 interface Props {
   activeView: View;
@@ -44,6 +44,7 @@ export function Sidebar({ activeView, onViewChange, onOpenConnections }: Props) 
         <NavButton active={activeView === "ec2"} icon={Monitor} label="File Explorer" onClick={() => onViewChange("ec2")} />
         <NavButton active={activeView === "s3"} icon={HardDrive} label="S3 Browser" onClick={() => onViewChange("s3")} />
         <NavButton active={activeView === "rds"} icon={Database} label="RDS PostgreSQL" onClick={() => onViewChange("rds")} />
+        <NavButton active={activeView === "terminal"} icon={TerminalSquare} label="Terminal" onClick={() => onViewChange("terminal")} />
       </div>
 
       <div className="p-3 border-t border-slate-700">
