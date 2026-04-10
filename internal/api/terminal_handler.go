@@ -170,7 +170,7 @@ func (h *TerminalHandler) HandleTerminal(w http.ResponseWriter, r *http.Request)
 	// Cancel context to unblock goroutines.
 	ws.Close(websocket.StatusNormalClosure, "shell exited")
 	// Drain remaining output.
-	_ = io.ReadAll(stdoutPipe)
-	_ = io.ReadAll(stderrPipe)
+	_, _ = io.ReadAll(stdoutPipe)
+	_, _ = io.ReadAll(stderrPipe)
 	wg.Wait()
 }
