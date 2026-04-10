@@ -159,6 +159,11 @@ export function RDSOverviewPanel() {
             error={erdError}
             data={erdData}
             onBack={() => setErdSchema(null)}
+            onTableClick={(tableName) => {
+              setErdSchema(null);
+              setSelectedSchema(erdSchema);
+              setSelectedTable(tableName);
+            }}
           />
         ) : selectedSchema && selectedTable ? (
           <TableDetailDrilldown
@@ -593,6 +598,7 @@ function ERDDrilldown({
   error,
   data,
   onBack,
+  onTableClick,
 }: {
   schema: string;
   db: string;
@@ -600,6 +606,7 @@ function ERDDrilldown({
   error: string | null;
   data: RDSERDResponse | null;
   onBack: () => void;
+  onTableClick: (tableName: string) => void;
 }) {
   return (
     <>
@@ -636,7 +643,9 @@ function ERDDrilldown({
         </div>
       )}
 
-      {!loading && !error && data && <RDSERDView data={data} />}
+      {!loading && !error && data && (
+        <RDSERDView data={data} onTableClick={onTableClick} />
+      )}
     </>
   );
 }
