@@ -174,6 +174,12 @@ func (c *Client) handleForward(local net.Conn, remoteAddr string) {
 	<-done
 }
 
+// NewSession creates a new SSH session on the underlying connection.
+// Callers are responsible for closing the returned session.
+func (c *Client) NewSession() (*ssh.Session, error) {
+	return c.sshClient.NewSession()
+}
+
 // Close shuts down the SFTP session and SSH connection.
 func (c *Client) Close() error {
 	if c.sftpClient != nil {
