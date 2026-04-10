@@ -12,73 +12,108 @@ interface TermSession {
   label: string;
   term: XTerm;
   fitAddon: FitAddon;
-  ws: WebSocket | null;
+  ws: WebSocket;
   status: "connecting" | "connected" | "disconnected";
 }
 
 let nextId = 1;
 
-function createSession(connId?: string): TermSession {
-  const id = nextId++;
-  const term = new XTerm({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-    theme: {
-      background: "#0f172a",
-      foreground: "#e2e8f0",
-      cursor: "#22d3ee",
-      selectionBackground: "#334155",
-      black: "#0f172a",
-      red: "#f87171",
-      green: "#4ade80",
-      yellow: "#facc15",
-      blue: "#60a5fa",
-      magenta: "#c084fc",
-      cyan: "#22d3ee",
-      white: "#e2e8f0",
-      brightBlack: "#475569",
-      brightRed: "#fca5a5",
-      brightGreen: "#86efac",
-      brightYellow: "#fde68a",
-      brightBlue: "#93c5fd",
-      brightMagenta: "#d8b4fe",
-      brightCyan: "#67e8f9",
-      brightWhite: "#f8fafc",
-    },
-    scrollback: 5000,
-    allowProposedApi: true,
-  });
-
-  const fitAddon = new FitAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(new WebLinksAddon());
-
-  const params = connId ? `?conn=${encodeURIComponent(connId)}` : "";
-  const ws = new WebSocket(`${WS_BASE}${params}`);
-  ws.binaryType = "arraybuffer";
-
-  return {
-    id,
-    label: `Terminal ${id}`,
-    term,
-    fitAddon,
-    ws,
-    status: "connecting",
-  };
-}
-
 export function Terminal() {
   const [sessions, setSessions] = useState<TermSession[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const wiredIds = useRef<Set<number>>(new Set());
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
 
-  const addSession = useCallback(() => {
-    const session = createSession();
+  const addSession = useCallback((connId?: string) => {
+    const id = nextId++;
+
+    const term = new XTerm({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      theme: {
+        background: "#0f172a",
+        foreground: "#e2e8f0",
+        cursor: "#22d3ee",
+        selectionBackground: "#334155",
+        black: "#0f172a",
+        red: "#f87171",
+        green: "#4ade80",
+        yellow: "#facc15",
+        blue: "#60a5fa",
+        magenta: "#c084fc",
+        cyan: "#22d3ee",
+        white: "#e2e8f0",
+        brightBlack: "#475569",
+        brightRed: "#fca5a5",
+        brightGreen: "#86efac",
+        brightYellow: "#fde68a",
+        brightBlue: "#93c5fd",
+        brightMagenta: "#d8b4fe",
+        brightCyan: "#67e8f9",
+        brightWhite: "#f8fafc",
+      },
+      scrollback: 5000,
+      allowProposedApi: true,
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
+
+    const params = connId ? `?conn=${encodeURIComponent(connId)}` : "";
+    const ws = new WebSocket(`${WS_BASE}${params}`);
+    ws.binaryType = "arraybuffer";
+
+    // Wire WebSocket events immediately (before adding to state)
+    ws.onopen = () => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status: "connected" as const } : s)),
+      );
+      const msg = JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows });
+      ws.send(msg);
+    };
+
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(ev.data));
+      } else {
+        term.write(ev.data as string);
+      }
+    };
+
+    ws.onclose = () => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status: "disconnected" as const } : s)),
+      );
+      term.write("\r\n\x1b[90m--- session ended ---\x1b[0m\r\n");
+    };
+
+    ws.onerror = () => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status: "disconnected" as const } : s)),
+      );
+    };
+
+    // Terminal input → WebSocket (binary)
+    const encoder = new TextEncoder();
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(encoder.encode(data));
+      }
+    });
+
+    const session: TermSession = {
+      id,
+      label: `Terminal ${id}`,
+      term,
+      fitAddon,
+      ws,
+      status: "connecting",
+    };
+
     setSessions((prev) => [...prev, session]);
-    setActiveId(session.id);
+    setActiveId(id);
   }, []);
 
   const removeSession = useCallback(
@@ -86,9 +121,8 @@ export function Terminal() {
       setSessions((prev) => {
         const session = prev.find((s) => s.id === id);
         if (session) {
-          session.ws?.close();
+          session.ws.close();
           session.term.dispose();
-          wiredIds.current.delete(id);
         }
         const next = prev.filter((s) => s.id !== id);
         if (activeId === id) {
@@ -102,9 +136,7 @@ export function Terminal() {
 
   // Auto-create first session on mount
   useEffect(() => {
-    if (sessions.length === 0) {
-      addSession();
-    }
+    addSession();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attach active terminal to DOM
@@ -112,69 +144,13 @@ export function Terminal() {
     const el = containerRef.current;
     if (!el || !activeSession) return;
 
-    // Clear container and attach
     el.innerHTML = "";
     activeSession.term.open(el);
 
-    // Fit after a frame so the container dimensions are settled
     requestAnimationFrame(() => {
       activeSession.fitAddon.fit();
     });
   }, [activeSession]);
-
-  // Wire up WebSocket ↔ xterm for each session
-  useEffect(() => {
-    for (const session of sessions) {
-      const { ws, term } = session;
-      if (!ws || ws.readyState > WebSocket.OPEN) continue;
-
-      // Skip if already wired
-      if (wiredIds.current.has(session.id)) continue;
-      wiredIds.current.add(session.id);
-
-      ws.onopen = () => {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === session.id ? { ...s, status: "connected" as const } : s)),
-        );
-        // Send initial size
-        const msg = JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows });
-        ws.send(msg);
-      };
-
-      ws.onmessage = (ev) => {
-        if (ev.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(ev.data));
-        } else {
-          term.write(ev.data);
-        }
-      };
-
-      ws.onclose = () => {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === session.id ? { ...s, status: "disconnected" as const } : s,
-          ),
-        );
-        term.write("\r\n\x1b[90m--- session ended ---\x1b[0m\r\n");
-      };
-
-      ws.onerror = () => {
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === session.id ? { ...s, status: "disconnected" as const } : s,
-          ),
-        );
-      };
-
-      // Terminal input → WebSocket (binary)
-      term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          const encoder = new TextEncoder();
-          ws.send(encoder.encode(data));
-        }
-      });
-    }
-  }, [sessions]);
 
   // Resize observer
   useEffect(() => {
@@ -182,7 +158,7 @@ export function Terminal() {
 
     const observer = new ResizeObserver(() => {
       activeSession.fitAddon.fit();
-      if (activeSession.ws?.readyState === WebSocket.OPEN) {
+      if (activeSession.ws.readyState === WebSocket.OPEN) {
         const msg = JSON.stringify({
           type: "resize",
           cols: activeSession.term.cols,
@@ -234,7 +210,7 @@ export function Terminal() {
           ))}
         </div>
         <button
-          onClick={addSession}
+          onClick={() => addSession()}
           className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white ml-1 shrink-0"
           title="New terminal"
         >
@@ -249,7 +225,7 @@ export function Terminal() {
             <AlertCircle size={32} className="mx-auto text-slate-600" />
             <p className="text-sm">No terminal sessions</p>
             <button
-              onClick={addSession}
+              onClick={() => addSession()}
               className="px-3 py-1.5 rounded bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 text-sm"
             >
               Open Terminal
