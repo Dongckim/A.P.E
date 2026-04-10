@@ -72,6 +72,7 @@ export function Terminal() {
   const [sessions, setSessions] = useState<TermSession[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const wiredIds = useRef<Set<number>>(new Set());
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
 
   const addSession = useCallback(() => {
@@ -87,6 +88,7 @@ export function Terminal() {
         if (session) {
           session.ws?.close();
           session.term.dispose();
+          wiredIds.current.delete(id);
         }
         const next = prev.filter((s) => s.id !== id);
         if (activeId === id) {
@@ -127,8 +129,8 @@ export function Terminal() {
       if (!ws || ws.readyState > WebSocket.OPEN) continue;
 
       // Skip if already wired
-      if ((ws as unknown as { _apeWired?: boolean })._apeWired) continue;
-      (ws as unknown as { _apeWired?: boolean })._apeWired = true;
+      if (wiredIds.current.has(session.id)) continue;
+      wiredIds.current.add(session.id);
 
       ws.onopen = () => {
         setSessions((prev) =>
