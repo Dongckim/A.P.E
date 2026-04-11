@@ -49,10 +49,9 @@ export function Dashboard() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
-        {!overview && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <pre className="text-cyan-400 leading-[1.1] text-[clamp(0.45rem,1.8vw,0.85rem)] font-bold select-none">{`
+        {/* Logo */}
+        <div className="flex flex-col items-center pt-6 pb-4">
+          <pre className="text-cyan-400 leading-[1.1] text-[clamp(0.45rem,1.8vw,0.85rem)] font-bold select-none">{`
           ▄▄██████████▄▄
         ▄████████████████▄
        ████████████████████
@@ -62,31 +61,32 @@ export function Dashboard() {
          ████│ ━━━━ │████
           ▀██└──────┘██▀
             ▀████████▀
-              `.trim()}</pre>
-              <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold mt-4 select-none">{`
+          `.trim()}</pre>
+          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold mt-3 select-none">{`
        ██████  ██████  ██████
        ██  ██  ██  ██  ██
        ██████  ██████  ████
        ██  ██  ██      ██
        ██  ██  ██      ██████
-              `.trim()}</pre>
-              <p className="text-slate-400 text-sm mt-4 tracking-widest">AWS Platform Explorer</p>
-              {loading && (
-                <div className="flex items-center justify-center gap-2 mt-6 text-slate-500">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span className="text-xs">Connecting...</span>
-                </div>
-              )}
-              {error && (
-                <div className="flex items-center justify-center gap-2 mt-6 text-red-400">
-                  <AlertCircle size={16} />
-                  <span className="text-xs">{error}</span>
-                </div>
-              )}
-            </div>
+          `.trim()}</pre>
+          <p className="text-slate-400 text-sm mt-3 tracking-widest">AWS Platform Explorer</p>
+        </div>
+
+        {/* Loading / Error */}
+        {loading && !overview && (
+          <div className="flex items-center justify-center py-12 text-slate-400">
+            <Loader2 size={24} className="animate-spin" />
           </div>
         )}
 
+        {error && !overview && (
+          <div className="flex items-center justify-center py-12 gap-2 text-red-400">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Dashboard grid */}
         {overview && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <SystemOverview data={overview} />
