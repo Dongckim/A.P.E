@@ -62,7 +62,7 @@ export function Dashboard() {
 ▀██└──────┘██▀
 ▀████████▀`
           }</pre>
-          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold select-none whitespace-pre text-center">{
+          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold select-none whitespace-pre">{
 `██████  ██████  ██████
 ██  ██  ██  ██  ██
 ██████  ██████  ████
