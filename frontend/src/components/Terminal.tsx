@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { AlertCircle, Plus, X, TerminalSquare } from "lucide-react";
+import { Minus, Plus, X, TerminalSquare, ChevronUp, ChevronDown } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -7,6 +7,8 @@ import "@xterm/xterm/css/xterm.css";
 
 const WS_PROTO = window.location.protocol === "https:" ? "wss:" : "ws:";
 const WS_BASE = `${WS_PROTO}//${window.location.host}/api/ec2/terminal`;
+
+const PANEL_HEIGHTS = [200, 320, 480];
 
 interface TermSession {
   id: number;
@@ -19,10 +21,12 @@ interface TermSession {
 
 let nextId = 1;
 
-export function Terminal() {
+export function TerminalPanel({ onClose }: { onClose: () => void }) {
   const [sessions, setSessions] = useState<TermSession[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [heightIdx, setHeightIdx] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelHeight = PANEL_HEIGHTS[heightIdx];
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
 
   const addSession = useCallback((connId?: string) => {
@@ -66,7 +70,6 @@ export function Terminal() {
     const ws = new WebSocket(`${WS_BASE}${params}`);
     ws.binaryType = "arraybuffer";
 
-    // Wire WebSocket events immediately (before adding to state)
     ws.onopen = () => {
       setSessions((prev) =>
         prev.map((s) => (s.id === id ? { ...s, status: "connected" as const } : s)),
@@ -96,7 +99,6 @@ export function Terminal() {
       );
     };
 
-    // Terminal input → WebSocket (binary)
     const encoder = new TextEncoder();
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -104,15 +106,7 @@ export function Terminal() {
       }
     });
 
-    const session: TermSession = {
-      id,
-      label: `Terminal ${id}`,
-      term,
-      fitAddon,
-      ws,
-      status: "connecting",
-    };
-
+    const session: TermSession = { id, label: `Terminal ${id}`, term, fitAddon, ws, status: "connecting" };
     setSessions((prev) => [...prev, session]);
     setActiveId(id);
   }, []);
@@ -138,104 +132,169 @@ export function Terminal() {
   // Auto-create first session on mount
   useEffect(() => {
     addSession();
+    return () => {
+      setSessions((prev) => {
+        for (const s of prev) {
+          s.ws.close();
+          s.term.dispose();
+        }
+        return [];
+      });
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Attach active terminal to DOM
+  // Attach active terminal to DOM — key fix: wait for container to have dimensions
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !activeSession) return;
 
-    el.innerHTML = "";
+    el.replaceChildren();
     activeSession.term.open(el);
 
-    requestAnimationFrame(() => {
-      activeSession.fitAddon.fit();
-    });
-  }, [activeSession]);
-
-  // Resize observer
-  useEffect(() => {
-    if (!containerRef.current || !activeSession) return;
-
-    const observer = new ResizeObserver(() => {
-      activeSession.fitAddon.fit();
-      if (activeSession.ws.readyState === WebSocket.OPEN) {
-        const msg = JSON.stringify({
-          type: "resize",
-          cols: activeSession.term.cols,
-          rows: activeSession.term.rows,
-        });
-        activeSession.ws.send(msg);
+    // xterm needs the container to have pixel dimensions before fit
+    const raf = requestAnimationFrame(() => {
+      try {
+        activeSession.fitAddon.fit();
+        if (activeSession.ws.readyState === WebSocket.OPEN) {
+          const msg = JSON.stringify({
+            type: "resize",
+            cols: activeSession.term.cols,
+            rows: activeSession.term.rows,
+          });
+          activeSession.ws.send(msg);
+        }
+      } catch {
+        // fit can throw if container has zero dimensions
       }
     });
-    observer.observe(containerRef.current);
+    return () => cancelAnimationFrame(raf);
+  }, [activeSession]);
+
+  // Re-fit when panel height changes
+  useEffect(() => {
+    if (!activeSession) return;
+    const timer = setTimeout(() => {
+      try {
+        activeSession.fitAddon.fit();
+        if (activeSession.ws.readyState === WebSocket.OPEN) {
+          const msg = JSON.stringify({
+            type: "resize",
+            cols: activeSession.term.cols,
+            rows: activeSession.term.rows,
+          });
+          activeSession.ws.send(msg);
+        }
+      } catch {
+        // ignore
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [panelHeight, activeSession]);
+
+  // Resize observer for width changes
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !activeSession) return;
+
+    const observer = new ResizeObserver(() => {
+      try {
+        activeSession.fitAddon.fit();
+        if (activeSession.ws.readyState === WebSocket.OPEN) {
+          const msg = JSON.stringify({
+            type: "resize",
+            cols: activeSession.term.cols,
+            rows: activeSession.term.rows,
+          });
+          activeSession.ws.send(msg);
+        }
+      } catch {
+        // ignore
+      }
+    });
+    observer.observe(el);
     return () => observer.disconnect();
   }, [activeSession]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tab bar */}
-      <div className="flex items-center px-2 bg-slate-800/50 border-b border-slate-700">
+    <div
+      className="absolute bottom-0 left-0 right-0 border-t border-slate-700 bg-slate-900 flex flex-col z-40"
+      style={{ height: panelHeight }}
+    >
+      {/* Header bar */}
+      <div className="flex items-center px-2 bg-slate-800/80 border-b border-slate-700 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto flex-1 py-1">
           {sessions.map((s) => (
             <button
               key={s.id}
               onClick={() => setActiveId(s.id)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs whitespace-nowrap transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition-colors ${
                 s.id === activeId
                   ? "bg-slate-700 text-white"
                   : "text-slate-400 hover:text-white hover:bg-slate-800"
               }`}
             >
-              <TerminalSquare size={12} />
+              <TerminalSquare size={11} />
               <span>{s.label}</span>
-              {s.status === "connecting" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              )}
-              {s.status === "connected" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              )}
-              {s.status === "disconnected" && (
-                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-              )}
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  s.status === "connecting"
+                    ? "bg-amber-400 animate-pulse"
+                    : s.status === "connected"
+                      ? "bg-emerald-400"
+                      : "bg-red-400"
+                }`}
+              />
               <span
                 onClick={(e) => {
                   e.stopPropagation();
                   removeSession(s.id);
                 }}
-                className="ml-1 p-0.5 rounded hover:bg-slate-600 text-slate-500 hover:text-white"
+                className="p-0.5 rounded hover:bg-slate-600 text-slate-500 hover:text-white"
               >
-                <X size={10} />
+                <X size={9} />
               </span>
             </button>
           ))}
+          <button
+            onClick={() => addSession()}
+            className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
+            title="New terminal"
+          >
+            <Plus size={12} />
+          </button>
         </div>
-        <button
-          onClick={() => addSession()}
-          className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white ml-1 shrink-0"
-          title="New terminal"
-        >
-          <Plus size={14} />
-        </button>
+
+        <div className="flex items-center gap-0.5 ml-2 shrink-0">
+          <button
+            onClick={() => setHeightIdx((i) => Math.min(i + 1, PANEL_HEIGHTS.length - 1))}
+            className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
+            title="Expand"
+          >
+            <ChevronUp size={12} />
+          </button>
+          <button
+            onClick={() => setHeightIdx((i) => Math.max(i - 1, 0))}
+            className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
+            title="Shrink"
+          >
+            <ChevronDown size={12} />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
+            title="Close terminal"
+          >
+            <Minus size={12} />
+          </button>
+        </div>
       </div>
 
-      {/* Terminal area */}
-      {sessions.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-slate-500">
-          <div className="text-center space-y-2">
-            <AlertCircle size={32} className="mx-auto text-slate-600" />
-            <p className="text-sm">No terminal sessions</p>
-            <button
-              onClick={() => addSession()}
-              className="px-3 py-1.5 rounded bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 text-sm"
-            >
-              Open Terminal
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div ref={containerRef} className="flex-1 min-h-0 bg-[#0f172a] p-1" />
-      )}
+      {/* Terminal render area — explicit pixel height so xterm can measure */}
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0 overflow-hidden"
+        style={{ background: "#0f172a", padding: 4 }}
+      />
     </div>
   );
 }

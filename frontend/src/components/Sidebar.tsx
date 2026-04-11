@@ -1,11 +1,13 @@
 import { Monitor, HardDrive, Plus, Settings, LayoutDashboard, Database, TerminalSquare } from "lucide-react";
 
-type View = "dashboard" | "ec2" | "s3" | "rds" | "terminal";
+type View = "dashboard" | "ec2" | "s3" | "rds";
 
 interface Props {
   activeView: View;
   onViewChange: (view: View) => void;
   onOpenConnections: () => void;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }
 
 function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof Monitor; label: string; onClick: () => void }) {
@@ -22,7 +24,7 @@ function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; ic
   );
 }
 
-export function Sidebar({ activeView, onViewChange, onOpenConnections }: Props) {
+export function Sidebar({ activeView, onViewChange, onOpenConnections, terminalOpen, onToggleTerminal }: Props) {
   return (
     <aside className="w-56 bg-slate-900 border-r border-slate-700 flex flex-col shrink-0">
       <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
@@ -44,10 +46,20 @@ export function Sidebar({ activeView, onViewChange, onOpenConnections }: Props) 
         <NavButton active={activeView === "ec2"} icon={Monitor} label="File Explorer" onClick={() => onViewChange("ec2")} />
         <NavButton active={activeView === "s3"} icon={HardDrive} label="S3 Browser" onClick={() => onViewChange("s3")} />
         <NavButton active={activeView === "rds"} icon={Database} label="RDS PostgreSQL" onClick={() => onViewChange("rds")} />
-        <NavButton active={activeView === "terminal"} icon={TerminalSquare} label="Terminal" onClick={() => onViewChange("terminal")} />
       </div>
 
-      <div className="p-3 border-t border-slate-700">
+      <div className="p-3 border-t border-slate-700 space-y-2">
+        <button
+          onClick={onToggleTerminal}
+          className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-sm transition-colors ${
+            terminalOpen
+              ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/30"
+              : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+          }`}
+        >
+          <TerminalSquare size={14} />
+          Terminal
+        </button>
         <button
           onClick={onOpenConnections}
           className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm transition-colors"
