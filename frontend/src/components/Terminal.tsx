@@ -5,7 +5,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
-const WS_BASE = `ws://${window.location.host}/api/ec2/terminal`;
+const WS_PROTO = window.location.protocol === "https:" ? "wss:" : "ws:";
+const WS_BASE = `${WS_PROTO}//${window.location.host}/api/ec2/terminal`;
 
 interface TermSession {
   id: number;

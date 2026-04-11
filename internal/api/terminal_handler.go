@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -98,7 +99,12 @@ func (h *TerminalHandler) HandleTerminal(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ctx := r.Context()
+	slog.Info("terminal session started", "remote", client.Config().Host)
+
+	// Use a standalone context so WebSocket I/O is not tied to the HTTP
+	// request lifecycle (r.Context() may be cancelled after hijack).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var wg sync.WaitGroup
 
 	// SSH stdout → WebSocket
@@ -167,9 +173,9 @@ func (h *TerminalHandler) HandleTerminal(w http.ResponseWriter, r *http.Request)
 
 	// Wait for shell to exit, then clean up.
 	_ = session.Wait()
-	// Cancel context to unblock goroutines.
+	slog.Info("terminal session ended", "remote", client.Config().Host)
+	cancel()
 	ws.Close(websocket.StatusNormalClosure, "shell exited")
-	// Drain remaining output.
 	_, _ = io.ReadAll(stdoutPipe)
 	_, _ = io.ReadAll(stderrPipe)
 	wg.Wait()
