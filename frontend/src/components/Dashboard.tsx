@@ -49,26 +49,27 @@ export function Dashboard() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
-        {/* Logo — identical to cmd/root.go bannerTmpl */}
-        <div className="flex flex-col items-center pt-6 pb-4">
-          <pre className="text-cyan-400 leading-[1.15] text-[clamp(0.4rem,1.6vw,0.75rem)] select-none whitespace-pre">{
-`          ▄▄██████████▄▄
-        ▄████████████████▄
-       ████████████████████
-       ███  (◕)    (◕)  ███
-       ████     ▄▄     ████
-        ████ ┌──────┐ ████
-         ████│ ━━━━ │████
-          ▀██└──────┘██▀
-            ▀████████▀
-
-       ██████  ██████  ██████
-       ██  ██  ██  ██  ██
-       ██████  ██████  ████
-       ██  ██  ██      ██
-       ██  ██  ██      ██████`
+        {/* Logo */}
+        <div className="flex flex-col items-center gap-5 pt-8 pb-6">
+          <pre className="text-cyan-400 leading-[1.15] text-[clamp(0.4rem,1.6vw,0.75rem)] select-none whitespace-pre text-center">{
+`▄▄██████████▄▄
+▄████████████████▄
+████████████████████
+███  (◕)    (◕)  ███
+████     ▄▄     ████
+████ ┌──────┐ ████
+████│ ━━━━ │████
+▀██└──────┘██▀
+▀████████▀`
           }</pre>
-          <p className="text-slate-400 text-sm mt-3 tracking-widest">AWS Platform Explorer</p>
+          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold select-none whitespace-pre text-center">{
+`██████  ██████  ██████
+██  ██  ██  ██  ██
+██████  ██████  ████
+██  ██  ██      ██
+██  ██  ██      ██████`
+          }</pre>
+          <p className="text-slate-400 text-sm tracking-widest">AWS Platform Explorer</p>
         </div>
 
         {/* Loading / Error */}
