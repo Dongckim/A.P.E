@@ -51,24 +51,24 @@ export function Dashboard() {
       <div className="flex-1 overflow-auto p-4">
         {/* Logo */}
         <div className="flex flex-col items-center pt-6 pb-4">
-          <pre className="text-cyan-400 leading-[1.1] text-[clamp(0.45rem,1.8vw,0.85rem)] font-bold select-none">{`
-          ▄▄██████████▄▄
-        ▄████████████████▄
-       ████████████████████
-       ███  (◕)    (◕)  ███
-       ████     ▄▄     ████
-        ████ ┌──────┐ ████
-         ████│ ━━━━ │████
-          ▀██└──────┘██▀
-            ▀████████▀
-          `.trim()}</pre>
-          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold mt-3 select-none">{`
-       ██████  ██████  ██████
-       ██  ██  ██  ██  ██
-       ██████  ██████  ████
-       ██  ██  ██      ██
-       ██  ██  ██      ██████
-          `.trim()}</pre>
+          <pre className="text-cyan-400 leading-[1.1] text-[clamp(0.45rem,1.8vw,0.85rem)] font-bold select-none">{[
+"    ▄▄██████████▄▄",
+"  ▄████████████████▄",
+" ████████████████████",
+" ███  (◕)    (◕)  ███",
+" ████     ▄▄     ████",
+"  ████ ┌──────┐ ████",
+"   ████│ ━━━━ │████",
+"    ▀██└──────┘██▀",
+"      ▀████████▀",
+].join("\n")}</pre>
+          <pre className="text-white leading-[1.15] text-[clamp(0.5rem,2vw,0.95rem)] font-bold mt-3 select-none">{[
+" ██████  ██████  ██████",
+" ██  ██  ██  ██  ██",
+" ██████  ██████  ████",
+" ██  ██  ██      ██",
+" ██  ██  ██      ██████",
+].join("\n")}</pre>
           <p className="text-slate-400 text-sm mt-3 tracking-widest">AWS Platform Explorer</p>
         </div>
 
