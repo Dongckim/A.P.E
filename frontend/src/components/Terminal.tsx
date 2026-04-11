@@ -16,18 +16,27 @@ interface TermSession {
   term: XTerm;
   fitAddon: FitAddon;
   ws: WebSocket;
-  status: "connecting" | "connected" | "disconnected";
 }
 
 let nextId = 1;
 
+function sendResize(ws: WebSocket, term: XTerm) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+  }
+}
+
 export function TerminalPanel({ onClose }: { onClose: () => void }) {
-  const [sessions, setSessions] = useState<TermSession[]>([]);
+  // Sessions are stored in a ref to avoid re-renders on mutable object changes.
+  // Only the ID list and status map live in state (for UI rendering).
+  const sessionsRef = useRef<Map<number, TermSession>>(new Map());
+  const [sessionIds, setSessionIds] = useState<number[]>([]);
+  const [statuses, setStatuses] = useState<Record<number, string>>({});
   const [activeId, setActiveId] = useState<number | null>(null);
   const [heightIdx, setHeightIdx] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const attachedIdRef = useRef<number | null>(null);
   const panelHeight = PANEL_HEIGHTS[heightIdx];
-  const activeSession = sessions.find((s) => s.id === activeId) ?? null;
 
   const addSession = useCallback((connId?: string) => {
     const id = nextId++;
@@ -71,11 +80,8 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status: "connected" as const } : s)),
-      );
-      const msg = JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows });
-      ws.send(msg);
+      setStatuses((prev) => ({ ...prev, [id]: "connected" }));
+      sendResize(ws, term);
     };
 
     ws.onmessage = (ev) => {
@@ -87,16 +93,12 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
     };
 
     ws.onclose = () => {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status: "disconnected" as const } : s)),
-      );
+      setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
       term.write("\r\n\x1b[90m--- session ended ---\x1b[0m\r\n");
     };
 
     ws.onerror = () => {
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status: "disconnected" as const } : s)),
-      );
+      setStatuses((prev) => ({ ...prev, [id]: "disconnected" }));
     };
 
     const encoder = new TextEncoder();
@@ -106,114 +108,108 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       }
     });
 
-    const session: TermSession = { id, label: `Terminal ${id}`, term, fitAddon, ws, status: "connecting" };
-    setSessions((prev) => [...prev, session]);
+    sessionsRef.current.set(id, { id, label: `Terminal ${id}`, term, fitAddon, ws });
+    setStatuses((prev) => ({ ...prev, [id]: "connecting" }));
+    setSessionIds((prev) => [...prev, id]);
     setActiveId(id);
   }, []);
 
-  const removeSession = useCallback(
-    (id: number) => {
-      setSessions((prev) => {
-        const session = prev.find((s) => s.id === id);
-        if (session) {
-          session.ws.close();
-          session.term.dispose();
-        }
-        const next = prev.filter((s) => s.id !== id);
-        if (activeId === id) {
-          setActiveId(next.length > 0 ? next[next.length - 1].id : null);
-        }
-        return next;
+  const removeSession = useCallback((id: number) => {
+    const session = sessionsRef.current.get(id);
+    if (session) {
+      session.ws.close();
+      session.term.dispose();
+      sessionsRef.current.delete(id);
+    }
+    if (attachedIdRef.current === id) {
+      attachedIdRef.current = null;
+    }
+    setSessionIds((prev) => {
+      const next = prev.filter((sid) => sid !== id);
+      setActiveId((curActive) => {
+        if (curActive === id) return next.length > 0 ? next[next.length - 1] : null;
+        return curActive;
       });
-    },
-    [activeId],
-  );
+      return next;
+    });
+    setStatuses((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
 
   // Auto-create first session on mount
   useEffect(() => {
     addSession();
     return () => {
-      setSessions((prev) => {
-        for (const s of prev) {
-          s.ws.close();
-          s.term.dispose();
-        }
-        return [];
-      });
+      for (const s of sessionsRef.current.values()) {
+        s.ws.close();
+        s.term.dispose();
+      }
+      sessionsRef.current.clear();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Attach active terminal to DOM — key fix: wait for container to have dimensions
+  // Attach active terminal to DOM — only when activeId changes
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !activeSession) return;
+    if (!el || activeId === null) return;
+    if (attachedIdRef.current === activeId) return;
 
+    const session = sessionsRef.current.get(activeId);
+    if (!session) return;
+
+    attachedIdRef.current = activeId;
     el.replaceChildren();
-    activeSession.term.open(el);
+    session.term.open(el);
+    session.term.focus();
 
-    // xterm needs the container to have pixel dimensions before fit
     const raf = requestAnimationFrame(() => {
       try {
-        activeSession.fitAddon.fit();
-        if (activeSession.ws.readyState === WebSocket.OPEN) {
-          const msg = JSON.stringify({
-            type: "resize",
-            cols: activeSession.term.cols,
-            rows: activeSession.term.rows,
-          });
-          activeSession.ws.send(msg);
-        }
+        session.fitAddon.fit();
+        sendResize(session.ws, session.term);
       } catch {
-        // fit can throw if container has zero dimensions
+        // ignore if container not ready
       }
     });
     return () => cancelAnimationFrame(raf);
-  }, [activeSession]);
+  }, [activeId]);
 
   // Re-fit when panel height changes
   useEffect(() => {
-    if (!activeSession) return;
+    if (activeId === null) return;
+    const session = sessionsRef.current.get(activeId);
+    if (!session) return;
     const timer = setTimeout(() => {
       try {
-        activeSession.fitAddon.fit();
-        if (activeSession.ws.readyState === WebSocket.OPEN) {
-          const msg = JSON.stringify({
-            type: "resize",
-            cols: activeSession.term.cols,
-            rows: activeSession.term.rows,
-          });
-          activeSession.ws.send(msg);
-        }
+        session.fitAddon.fit();
+        sendResize(session.ws, session.term);
       } catch {
         // ignore
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [panelHeight, activeSession]);
+  }, [panelHeight, activeId]);
 
   // Resize observer for width changes
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !activeSession) return;
+    if (!el || activeId === null) return;
 
     const observer = new ResizeObserver(() => {
+      const session = sessionsRef.current.get(activeId);
+      if (!session) return;
       try {
-        activeSession.fitAddon.fit();
-        if (activeSession.ws.readyState === WebSocket.OPEN) {
-          const msg = JSON.stringify({
-            type: "resize",
-            cols: activeSession.term.cols,
-            rows: activeSession.term.rows,
-          });
-          activeSession.ws.send(msg);
-        }
+        session.fitAddon.fit();
+        sendResize(session.ws, session.term);
       } catch {
         // ignore
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [activeSession]);
+  }, [activeId]);
 
   return (
     <div
@@ -223,38 +219,42 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
       {/* Header bar */}
       <div className="flex items-center px-2 bg-slate-800/80 border-b border-slate-700 shrink-0">
         <div className="flex items-center gap-1 overflow-x-auto flex-1 py-1">
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveId(s.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition-colors ${
-                s.id === activeId
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <TerminalSquare size={11} />
-              <span>{s.label}</span>
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  s.status === "connecting"
-                    ? "bg-amber-400 animate-pulse"
-                    : s.status === "connected"
-                      ? "bg-emerald-400"
-                      : "bg-red-400"
+          {sessionIds.map((id) => {
+            const status = statuses[id] ?? "connecting";
+            const label = sessionsRef.current.get(id)?.label ?? `Terminal ${id}`;
+            return (
+              <button
+                key={id}
+                onClick={() => setActiveId(id)}
+                className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition-colors ${
+                  id === activeId
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
                 }`}
-              />
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeSession(s.id);
-                }}
-                className="p-0.5 rounded hover:bg-slate-600 text-slate-500 hover:text-white"
               >
-                <X size={9} />
-              </span>
-            </button>
-          ))}
+                <TerminalSquare size={11} />
+                <span>{label}</span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    status === "connecting"
+                      ? "bg-amber-400 animate-pulse"
+                      : status === "connected"
+                        ? "bg-emerald-400"
+                        : "bg-red-400"
+                  }`}
+                />
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeSession(id);
+                  }}
+                  className="p-0.5 rounded hover:bg-slate-600 text-slate-500 hover:text-white"
+                >
+                  <X size={9} />
+                </span>
+              </button>
+            );
+          })}
           <button
             onClick={() => addSession()}
             className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
@@ -289,7 +289,7 @@ export function TerminalPanel({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Terminal render area — explicit pixel height so xterm can measure */}
+      {/* Terminal render area */}
       <div
         ref={containerRef}
         className="flex-1 min-h-0 overflow-hidden"
