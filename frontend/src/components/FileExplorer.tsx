@@ -1,6 +1,6 @@
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
-import { useState, useCallback, useEffect, useRef } from "react";
-import type { FileInfo, ViewMode } from "../types";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import type { FileInfo, ViewMode, SortKey, SortOrder } from "../types";
 import { Breadcrumb } from "./Breadcrumb";
 import { Toolbar } from "./Toolbar";
 import { GridView } from "./GridView";
@@ -17,6 +17,39 @@ export function FileExplorer() {
   const { path, files, loading, error, navigate, refresh } = useFileSystem();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Search & sort (persisted per session)
+  const [search, setSearch] = useState<string>(() => sessionStorage.getItem("ape:fe:search") || "");
+  const [sortKey, setSortKey] = useState<SortKey>(() => (sessionStorage.getItem("ape:fe:sortKey") as SortKey) || "name");
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => (sessionStorage.getItem("ape:fe:sortOrder") as SortOrder) || "asc");
+
+  useEffect(() => { sessionStorage.setItem("ape:fe:search", search); }, [search]);
+  useEffect(() => { sessionStorage.setItem("ape:fe:sortKey", sortKey); }, [sortKey]);
+  useEffect(() => { sessionStorage.setItem("ape:fe:sortOrder", sortOrder); }, [sortOrder]);
+
+  const handleSortChange = useCallback((key: SortKey, order: SortOrder) => {
+    setSortKey(key);
+    setSortOrder(order);
+  }, []);
+
+  const visibleFiles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q ? files.filter((f) => f.name.toLowerCase().includes(q)) : files;
+    const dir = sortOrder === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      // Directories always come before files
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+      let cmp = 0;
+      if (sortKey === "name") {
+        cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+      } else if (sortKey === "size") {
+        cmp = a.size - b.size;
+      } else {
+        cmp = new Date(a.mod_time).getTime() - new Date(b.mod_time).getTime();
+      }
+      return cmp * dir;
+    });
+  }, [files, search, sortKey, sortOrder]);
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; file: FileInfo } | null>(null);
@@ -48,16 +81,16 @@ export function FileExplorer() {
         if (next.has(file.path)) { next.delete(file.path); } else { next.add(file.path); }
       } else if (e.shiftKey && prev.size > 0) {
         const last = Array.from(prev).pop()!;
-        const a = files.findIndex((f) => f.path === last);
-        const b = files.findIndex((f) => f.path === file.path);
-        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(files[i].path);
+        const a = visibleFiles.findIndex((f) => f.path === last);
+        const b = visibleFiles.findIndex((f) => f.path === file.path);
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(visibleFiles[i].path);
       } else {
         next.clear();
         next.add(file.path);
       }
       return next;
     });
-  }, [files]);
+  }, [visibleFiles]);
 
   // --- Open ---
   const handleOpen = useCallback((file: FileInfo) => {
@@ -141,7 +174,7 @@ export function FileExplorer() {
       }
       // Delete / Backspace: delete selected
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0 && !renamingPath && !editingFile) {
-        const file = files.find((f) => selected.has(f.path));
+        const file = visibleFiles.find((f) => selected.has(f.path));
         if (file) setDeleteTarget(file);
       }
       // Cmd+C: copy path
@@ -151,7 +184,7 @@ export function FileExplorer() {
       }
       // Enter: open selected
       if (e.key === "Enter" && selected.size === 1 && !renamingPath) {
-        const file = files.find((f) => selected.has(f.path));
+        const file = visibleFiles.find((f) => selected.has(f.path));
         if (file) handleOpen(file);
       }
       // Escape: close editor / deselect
@@ -167,7 +200,7 @@ export function FileExplorer() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selected, files, renamingPath, editingFile, handleNewFolder, handleOpen, showShortcuts]);
+  }, [selected, visibleFiles, renamingPath, editingFile, handleNewFolder, handleOpen, showShortcuts]);
 
   // Editor view
   if (editingFile) {
@@ -189,6 +222,11 @@ export function FileExplorer() {
         onRefresh={refresh}
         onNewFolder={handleNewFolder}
         selectedCount={selected.size}
+        search={search}
+        onSearchChange={setSearch}
+        sortKey={sortKey}
+        sortOrder={sortOrder}
+        onSortChange={handleSortChange}
       />
 
       <div className="flex-1 overflow-auto" onClick={() => setSelected(new Set())}>
@@ -207,10 +245,15 @@ export function FileExplorer() {
             This folder is empty — drag files here to upload
           </div>
         )}
-        {!loading && !error && files.length > 0 && (
+        {!loading && !error && files.length > 0 && visibleFiles.length === 0 && (
+          <div className="flex items-center justify-center h-64 text-slate-500">
+            No files match "{search}"
+          </div>
+        )}
+        {!loading && !error && visibleFiles.length > 0 && (
           viewMode === "grid" ? (
             <GridView
-              files={files}
+              files={visibleFiles}
               selected={selected}
               renamingPath={renamingPath}
               onSelect={handleSelect}
@@ -221,7 +264,7 @@ export function FileExplorer() {
             />
           ) : (
             <ListView
-              files={files}
+              files={visibleFiles}
               selected={selected}
               renamingPath={renamingPath}
               onSelect={handleSelect}

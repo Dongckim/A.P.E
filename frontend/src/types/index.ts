@@ -40,6 +40,9 @@ export interface ApiResponse<T> {
 
 export type ViewMode = "grid" | "list";
 
+export type SortKey = "name" | "size" | "mod_time";
+export type SortOrder = "asc" | "desc";
+
 // --- Dashboard ---
 
 export interface DashboardOverview {
