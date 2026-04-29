@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 
@@ -207,8 +208,17 @@ func (h *EC2Handler) HandleDownloadFile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filename := filepath.Base(path)
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	if r.URL.Query().Get("inline") != "" {
+		ctype := mime.TypeByExtension(filepath.Ext(path))
+		if ctype == "" {
+			ctype = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", ctype)
+		w.Header().Set("Content-Disposition", "inline; filename=\""+filename+"\"")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	}
 
 	if err := client.DownloadFile(path, w); err != nil {
 		// Headers already sent, can't write JSON error — log only

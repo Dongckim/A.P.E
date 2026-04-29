@@ -1,6 +1,7 @@
-import { Folder, File } from "lucide-react";
+import { Folder, File, Image, Film, Music, FileText } from "lucide-react";
 import type { FileInfo } from "../types";
 import { RenameInput } from "./RenameInput";
+import { getMediaKind } from "../utils/media";
 
 interface Props {
   files: FileInfo[];
@@ -27,6 +28,16 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function getRowIcon(file: FileInfo) {
+  if (file.is_dir) return <Folder size={16} className="text-cyan-400 shrink-0" />;
+  const kind = getMediaKind(file.name);
+  if (kind === "image") return <Image size={16} className="text-pink-400 shrink-0" />;
+  if (kind === "video") return <Film size={16} className="text-purple-400 shrink-0" />;
+  if (kind === "audio") return <Music size={16} className="text-indigo-400 shrink-0" />;
+  if (kind === "pdf") return <FileText size={16} className="text-red-400 shrink-0" />;
+  return <File size={16} className="text-slate-400 shrink-0" />;
+}
+
 export function ListView({ files, selected, renamingPath, onSelect, onOpen, onContextMenu, onRenameConfirm, onRenameCancel }: Props) {
   return (
     <table className="w-full text-sm">
@@ -50,11 +61,7 @@ export function ListView({ files, selected, renamingPath, onSelect, onOpen, onCo
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(file, e); }}
           >
             <td className="px-4 py-1.5 flex items-center gap-2">
-              {file.is_dir ? (
-                <Folder size={16} className="text-cyan-400 shrink-0" />
-              ) : (
-                <File size={16} className="text-slate-400 shrink-0" />
-              )}
+              {getRowIcon(file)}
               {renamingPath === file.path ? (
                 <RenameInput
                   initialName={file.name}

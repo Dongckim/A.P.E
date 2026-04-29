@@ -1,6 +1,7 @@
-import { Folder, File, FileText, FileCode, Image } from "lucide-react";
+import { Folder, File, FileText, FileCode, Image, Film, Music } from "lucide-react";
 import type { FileInfo } from "../types";
 import { RenameInput } from "./RenameInput";
+import { getMediaKind } from "../utils/media";
 
 interface Props {
   files: FileInfo[];
@@ -15,9 +16,12 @@ interface Props {
 
 function getIcon(file: FileInfo) {
   if (file.is_dir) return <Folder size={40} className="text-cyan-400" />;
+  const kind = getMediaKind(file.name);
+  if (kind === "image") return <Image size={40} className="text-pink-400" />;
+  if (kind === "video") return <Film size={40} className="text-purple-400" />;
+  if (kind === "audio") return <Music size={40} className="text-indigo-400" />;
+  if (kind === "pdf") return <FileText size={40} className="text-red-400" />;
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
-  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext))
-    return <Image size={40} className="text-pink-400" />;
   if (["ts", "tsx", "js", "jsx", "go", "py", "rs", "java", "c", "cpp", "h"].includes(ext))
     return <FileCode size={40} className="text-green-400" />;
   if (["txt", "md", "json", "yaml", "yml", "toml", "xml", "csv", "log"].includes(ext))

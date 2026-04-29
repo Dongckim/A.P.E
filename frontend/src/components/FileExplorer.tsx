@@ -9,8 +9,10 @@ import { ContextMenu } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { UploadOverlay } from "./UploadOverlay";
 import { TextEditor } from "./TextEditor";
+import { MediaPreview } from "./MediaPreview";
 import { useFileSystem } from "../hooks/useFileSystem";
 import { uploadFile, downloadFile, deleteFile, renameFile, mkdir } from "../api/client";
+import { getMediaKind } from "../utils/media";
 import { Loader2, AlertCircle } from "lucide-react";
 
 export function FileExplorer() {
@@ -68,6 +70,9 @@ export function FileExplorer() {
   // Editor
   const [editingFile, setEditingFile] = useState<string | null>(null);
 
+  // Media preview
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
+
   // Keyboard shortcuts modal
   const [showShortcuts, setShowShortcuts] = useState(false);
 
@@ -97,7 +102,10 @@ export function FileExplorer() {
     if (file.is_dir) {
       setSelected(new Set());
       setEditingFile(null);
+      setPreviewFile(null);
       navigate(file.path);
+    } else if (getMediaKind(file.name)) {
+      setPreviewFile(file.path);
     } else {
       setEditingFile(file.path);
     }
@@ -173,7 +181,7 @@ export function FileExplorer() {
         handleNewFolder();
       }
       // Delete / Backspace: delete selected
-      if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0 && !renamingPath && !editingFile) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0 && !renamingPath && !editingFile && !previewFile) {
         const file = visibleFiles.find((f) => selected.has(f.path));
         if (file) setDeleteTarget(file);
       }
@@ -183,13 +191,14 @@ export function FileExplorer() {
         navigator.clipboard.writeText(sel);
       }
       // Enter: open selected
-      if (e.key === "Enter" && selected.size === 1 && !renamingPath) {
+      if (e.key === "Enter" && selected.size === 1 && !renamingPath && !editingFile && !previewFile) {
         const file = visibleFiles.find((f) => selected.has(f.path));
         if (file) handleOpen(file);
       }
-      // Escape: close editor / deselect
+      // Escape: close preview / editor / deselect
       if (e.key === "Escape") {
         if (showShortcuts) setShowShortcuts(false);
+        else if (previewFile) setPreviewFile(null);
         else if (editingFile) setEditingFile(null);
         else setSelected(new Set());
       }
@@ -200,7 +209,12 @@ export function FileExplorer() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selected, visibleFiles, renamingPath, editingFile, handleNewFolder, handleOpen, showShortcuts]);
+  }, [selected, visibleFiles, renamingPath, editingFile, previewFile, handleNewFolder, handleOpen, showShortcuts]);
+
+  // Media preview view
+  if (previewFile) {
+    return <MediaPreview filePath={previewFile} onClose={() => setPreviewFile(null)} />;
+  }
 
   // Editor view
   if (editingFile) {
